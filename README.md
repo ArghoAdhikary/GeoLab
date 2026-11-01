@@ -14,14 +14,15 @@ See [FEATURES.md](FEATURES.md) for exactly what is and isn't implemented, and ho
 ## Install
 
 ### Ready-made app
-Download `StrataLab-windows.zip` or `StrataLab-macos.zip` from the repository's **Releases** page
+Download `StrataLab-windows.zip` or `StrataLab-macos.zip` from the
+[Releases](https://github.com/ArghoAdhikary/StrataLab/releases) page
 (or the latest **Actions** run), unzip, and run `StrataLab.exe` / `StrataLab.app`.
 The builds are not code-signed: on Windows choose *More info > Run anyway*; on macOS right-click the
 app and choose *Open* the first time.
 
 ### From source (any OS, Python 3.10+)
 ```bash
-git clone https://github.com/<you>/StrataLab.git
+git clone https://github.com/ArghoAdhikary/StrataLab.git
 ```
 ```bash
 cd StrataLab
