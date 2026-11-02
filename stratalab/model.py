@@ -11,28 +11,46 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 UNIT_SYSTEMS: dict[str, dict[str, Any]] = {
+    # time is in seconds in both systems; thermal values are SI-consistent (W, J)
     "metric": {
         "length": "m", "force": "kN", "pressure": "kPa", "unit_weight": "kN/m³",
-        "k": "m/s", "flux": "m³/s", "gamma_w": 9.807,
+        "k": "m/s", "flux": "m³/s", "gamma_w": 9.807, "g": 9.807, "time": "s",
+        "modulus": "kPa", "compressibility": "1/kPa", "temperature": "°C",
+        "conductivity_th": "W/m/°C", "heat_capacity": "J/m³/°C", "latent": 334e6,
+        "concentration": "g/m³",
     },
     "imperial": {
         "length": "ft", "force": "lbf", "pressure": "psf", "unit_weight": "pcf",
-        "k": "ft/s", "flux": "ft³/s", "gamma_w": 62.4,
+        "k": "ft/s", "flux": "ft³/s", "gamma_w": 62.4, "g": 32.174, "time": "s",
+        "modulus": "psf", "compressibility": "1/psf", "temperature": "°F",
+        "conductivity_th": "Btu/s/ft/°F", "heat_capacity": "Btu/ft³/°F", "latent": 8970.0,
+        "concentration": "lb/ft³",
     },
 }
 
-STRENGTH_MODELS = {
-    "mohr_coulomb": "Mohr-Coulomb",
-    "undrained": "Undrained (phi = 0)",
-    "bedrock": "Bedrock (impenetrable)",
-}
+from .strength import STRENGTH_MODELS  # noqa: E402  (re-exported for the UI)
 
 SLOPE_METHODS = {
     "ordinary": "Ordinary (Fellenius)",
     "bishop": "Bishop Simplified",
     "janbu": "Janbu Simplified",
+    "janbu_corrected": "Janbu Simplified, corrected (f0)",
+    "janbu_generalized": "Janbu Generalized",
     "spencer": "Spencer",
     "morgenstern_price": "Morgenstern-Price",
+    "corps1": "Corps of Engineers #1",
+    "corps2": "Corps of Engineers #2",
+    "lowe_karafiath": "Lowe-Karafiath",
+    "sarma": "Sarma (vertical slices)",
+    "finite_element": "Finite element stress",
+}
+
+INTERSLICE_FUNCTIONS = {
+    "half_sine": "Half-sine",
+    "constant": "Constant",
+    "clipped_sine": "Clipped sine",
+    "trapezoidal": "Trapezoidal",
+    "user": "Data points (x/L, f)",
 }
 
 PWP_MODES = {
@@ -45,17 +63,83 @@ PWP_MODES = {
 SEARCH_MODES = {
     "entry_exit": "Entry and exit",
     "grid_radius": "Grid and radius",
+    "grid_tangent": "Grid and tangent lines",
+    "block": "Block (two grids)",
+    "auto": "Auto locate",
     "fully_specified": "Fully specified",
 }
 
-BC_TYPES = {
-    "head": "Total head",
-    "pressure_head": "Pressure head",
-    "flux": "Unit flux (inflow +)",
-    "seepage_face": "Potential seepage face",
+HYDRAULIC_MODELS = {
+    "saturated": "Saturated only (storage from compressibility)",
+    "gardner": "Saturated / unsaturated (Gardner)",
+    "van_genuchten": "Saturated / unsaturated (van Genuchten-Mualem)",
 }
 
-ANALYSIS_KINDS = {"slope": "Slope stability (limit equilibrium)", "seepage": "Seepage (finite element, steady state)"}
+STRESS_MODELS = {
+    "linear_elastic": "Linear elastic",
+    "elastic_plastic": "Elastic-plastic (Mohr-Coulomb)",
+    "none": "None (excluded)",
+}
+
+# boundary conditions, grouped by physics
+BC_KINDS = {
+    "hydraulic": {
+        "head": "Total head",
+        "pressure_head": "Pressure head",
+        "flux": "Unit flux (inflow +)",
+        "nodal_flux": "Total flux at nodes (inflow +)",
+        "seepage_face": "Potential seepage face",
+        "infiltration": "Infiltration with ponding review",
+        "free_drainage": "Free drainage (unit gradient)",
+    },
+    "stress": {
+        "fixed_x": "Fixed x",
+        "fixed_y": "Fixed y",
+        "fixed_xy": "Fixed x and y",
+        "pressure": "Normal pressure (compression +)",
+        "shear": "Shear stress (along edge)",
+        "force_x": "Force x (total)",
+        "force_y": "Force y (total)",
+        "displacement_y": "Displacement y",
+    },
+    "thermal": {
+        "temperature": "Temperature",
+        "heat_flux": "Unit heat flux (into ground +)",
+        "convective": "Convective (h, ambient temperature)",
+    },
+    "transport": {
+        "concentration": "Concentration",
+        "mass_flux": "Unit mass flux (in +)",
+        "free_exit": "Free exit (advective outflow)",
+    },
+    "air": {
+        "air_pressure": "Air pressure (gauge)",
+        "air_flux": "Unit air flux (in +)",
+    },
+}
+BC_TYPES = {k: v for group in BC_KINDS.values() for k, v in group.items()}
+BC_KIND_OF = {k: kind for kind, group in BC_KINDS.items() for k in group}
+
+ANALYSIS_KINDS = {
+    "slope": "Slope stability (limit equilibrium)",
+    "seepage": "Seepage (groundwater flow)",
+    "stress": "Stress-deformation",
+    "dynamic": "Dynamic (earthquake)",
+    "thermal": "Thermal (heat transfer, freezing)",
+    "transport": "Contaminant transport",
+    "air": "Air flow",
+}
+
+# which BC groups and parent analyses each analysis kind uses
+KIND_BCS = {"seepage": "hydraulic", "stress": "stress", "dynamic": "stress", "thermal": "thermal",
+            "transport": "transport", "air": "air"}
+
+REINFORCEMENT_TYPES = {
+    "anchor": "Anchor (bonded length at the end)",
+    "nail": "Nail (bonded full length)",
+    "geosynthetic": "Geosynthetic",
+    "pile": "Pile / dowel (shear)",
+}
 
 MATERIAL_COLORS = ["#d9c49c", "#a9c98f", "#c99f7f", "#9fb7d6", "#d6a3b8", "#b5b5b5", "#e3d37a", "#8fc9c2"]
 
@@ -80,6 +164,56 @@ class Material:
     k_sat: float = 1e-6
     k_ratio: float = 1.0          # ky / kx
     unsat_alpha: float = 2.0      # Gardner exponent (1/length) for relative conductivity
+    # -- more strength parameters (see strength.py) --
+    phi_b: float = 0.0            # suction friction angle (unsaturated strength)
+    c_rate: float = 0.0           # undrained strength increase per unit depth below datum
+    datum: float = 0.0
+    shansep_s: float = 0.22
+    shansep_m: float = 0.8
+    ocr: float = 1.0
+    phi2: float = 20.0            # bilinear: friction angle above sigma_break
+    sigma_break: float = 100.0
+    sn_table: list = field(default_factory=list)   # [[normal stress, shear strength], ...]
+    sigci: float = 10000.0        # Hoek-Brown intact UCS
+    gsi: float = 50.0
+    mi: float = 10.0
+    hb_d: float = 0.0
+    cohesion_v: float = 5.0       # anisotropic: values on a vertical plane
+    phi_v: float = 30.0
+    distribution: str = "normal"  # probabilistic: normal | lognormal | uniform
+    # -- hydraulic --
+    hyd_model: str = "gardner"
+    theta_s: float = 0.40
+    theta_r: float = 0.05
+    vg_alpha: float = 1.0         # 1/length
+    vg_n: float = 1.6
+    mv: float = 1e-5              # coefficient of volume compressibility (1/pressure)
+    # -- stress-deformation --
+    stress_model: str = "linear_elastic"
+    E: float = 20000.0
+    nu: float = 0.3
+    psi: float = 0.0              # dilation angle
+    k0: float = 0.0               # 0 = nu / (1 - nu)
+    # -- dynamic --
+    damping: float = 0.05
+    gamma_ref: float = 0.0        # reference shear strain for equivalent linear (0 = linear)
+    damping_max: float = 0.20
+    # -- thermal --
+    th_k: float = 1.5             # unfrozen thermal conductivity
+    th_k_frozen: float = 2.2
+    th_c: float = 2.4e6           # unfrozen volumetric heat capacity
+    th_c_frozen: float = 1.9e6
+    th_water: float = 0.30        # volumetric water content for latent heat
+    th_freeze_range: float = 1.0  # temperature range below 0 over which water freezes
+    # -- contaminant transport --
+    disp_l: float = 1.0           # longitudinal dispersivity
+    disp_t: float = 0.1
+    diffusion: float = 1e-9
+    kd: float = 0.0               # distribution coefficient (adsorption)
+    dry_density: float = 1600.0
+    half_life: float = 0.0        # 0 = no decay
+    # -- air flow --
+    k_air: float = 1e-5           # air conductivity of dry soil
 
     @classmethod
     def from_dict(cls, d: dict) -> "Material":
@@ -120,9 +254,52 @@ class BoundaryCondition:
     type: str
     value: float
     points: list[list[float]]
+    value2: float = 0.0                              # second parameter (e.g. convective ambient temperature)
+    fn: list = field(default_factory=list)           # [[time, value], ...] overrides value when given
+
+    @property
+    def kind(self) -> str:
+        return BC_KIND_OF.get(self.type, "hydraulic")
+
+    def at(self, t: float | None) -> float:
+        if t is None or not self.fn:
+            return self.value
+        import numpy as np
+        f = sorted(self.fn)
+        return float(np.interp(t, [p[0] for p in f], [p[1] for p in f]))
 
     @classmethod
     def from_dict(cls, d: dict) -> "BoundaryCondition":
+        return cls(**_filtered(cls, d))
+
+
+@dataclass
+class Reinforcement:
+    id: int
+    type: str                    # anchor | nail | geosynthetic | pile
+    x1: float                    # head (at the slope face)
+    y1: float
+    x2: float                    # far end (inside the slope)
+    y2: float
+    capacity: float = 100.0      # tensile (or shear, for piles) capacity per reinforcement
+    bond: float = 50.0           # pullout resistance per unit length
+    bond_length: float = 3.0     # anchors: bonded length at the far end
+    spacing: float = 1.0         # out-of-plane spacing
+    f_dependent: bool = False    # True: force is divided by the factor of safety
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Reinforcement":
+        return cls(**_filtered(cls, d))
+
+
+@dataclass
+class FluxSection:
+    id: int
+    name: str
+    points: list[list[float]]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FluxSection":
         return cls(**_filtered(cls, d))
 
 
@@ -159,6 +336,16 @@ class SearchSettings:
     circles: list[list[float]] = field(default_factory=list)
     polylines: list[list[list[float]]] = field(default_factory=list)
     min_depth: float = 0.1
+    # tangent lines (grid and tangent): horizontal lines y = tangent_y1 .. tangent_y2
+    tangent_y1: float = 0.0
+    tangent_y2: float = 0.0
+    n_tangent: int = 6
+    # block search: left and right grids of base points, projection angles in degrees
+    block_left: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])    # x1, y1, x2, y2
+    block_right: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
+    block_n: int = 4
+    block_angle_left: float = 45.0
+    block_angle_right: float = 45.0
 
 
 @dataclass
@@ -183,11 +370,36 @@ class Analysis:
     sensitivity_low: float = 0.0
     sensitivity_high: float = 0.0
     sensitivity_steps: int = 10
-    # seepage
+    kv: float = 0.0                     # vertical seismic coefficient (downward +)
+    interslice_points: list = field(default_factory=list)
+    tension_crack_depth: float = 0.0
+    tension_crack_angle: float = 0.0    # degrees; 0 = off
+    crack_water: float = 0.0            # fraction of the crack filled with water
+    optimize: bool = False
+    opt_iterations: int = 400
+    stress_parent_id: int | None = None  # finite element stress method
+    # finite element analyses (seepage, stress, thermal, transport, air, dynamic)
     mesh_size: float = 1.0
     unsaturated: bool = True
     max_iter: int = 100
     tolerance: float = 1e-4
+    transient: bool = False
+    duration: float = 86400.0
+    n_steps: int = 20
+    step_growth: float = 1.0            # ratio between successive time steps
+    initial: str = "parent"             # parent | water_table | value
+    initial_value: float = 0.0
+    # stress-deformation
+    stress_type: str = "insitu"         # insitu | load | consolidation
+    load_steps: int = 10
+    srm: bool = False                   # strength reduction factor of safety
+    # dynamic
+    motion: list = field(default_factory=list)   # [[t, acceleration in g], ...]
+    dt: float = 0.01
+    equivalent_linear: bool = False
+    n_eq_iter: int = 6
+    # transport
+    particles: list = field(default_factory=list)   # [[x, y], ...] for particle tracking
     results: dict | None = None
 
     @classmethod
@@ -213,6 +425,8 @@ class Project:
     boundary_conditions: list[BoundaryCondition] = field(default_factory=list)
     analyses: list[Analysis] = field(default_factory=list)
     sketch_texts: list[SketchText] = field(default_factory=list)
+    reinforcements: list[Reinforcement] = field(default_factory=list)
+    flux_sections: list[FluxSection] = field(default_factory=list)
     grid_spacing: float = 1.0
 
     # -- lookups -------------------------------------------------------
@@ -255,11 +469,26 @@ class Project:
         self.analyses.append(a)
         return a
 
-    def add_bc(self, name: str, type: str, value: float, points) -> BoundaryCondition:
+    def add_bc(self, name: str, type: str, value: float, points, **kw) -> BoundaryCondition:
         bc = BoundaryCondition(id=self.next_id(self.boundary_conditions), name=name, type=type,
-                               value=float(value), points=[[float(x), float(y)] for x, y in points])
+                               value=float(value), points=[[float(x), float(y)] for x, y in points], **kw)
         self.boundary_conditions.append(bc)
         return bc
+
+    def add_reinforcement(self, type: str, x1, y1, x2, y2, **kw) -> Reinforcement:
+        r = Reinforcement(id=self.next_id(self.reinforcements), type=type, x1=float(x1), y1=float(y1),
+                          x2=float(x2), y2=float(y2), **kw)
+        self.reinforcements.append(r)
+        return r
+
+    def add_flux_section(self, name: str, points) -> FluxSection:
+        f = FluxSection(id=self.next_id(self.flux_sections), name=name,
+                        points=[[float(x), float(y)] for x, y in points])
+        self.flux_sections.append(f)
+        return f
+
+    def bcs(self, group: str) -> list[BoundaryCondition]:
+        return [b for b in self.boundary_conditions if b.kind == group]
 
     def children(self, aid: int | None) -> list[Analysis]:
         return [a for a in self.analyses if a.parent_id == aid]
@@ -280,7 +509,8 @@ class Project:
     def from_dict(cls, d: dict) -> "Project":
         p = cls(**{k: v for k, v in _filtered(cls, d).items()
                    if k not in ("materials", "regions", "point_loads", "surcharges",
-                                "boundary_conditions", "analyses", "sketch_texts")})
+                                "boundary_conditions", "analyses", "sketch_texts",
+                                "reinforcements", "flux_sections")})
         if p.units not in UNIT_SYSTEMS:
             raise ValueError(f"Unknown unit system: {p.units}")
         p.materials = [Material.from_dict(m) for m in d.get("materials", [])]
@@ -290,6 +520,8 @@ class Project:
         p.boundary_conditions = [BoundaryCondition.from_dict(b) for b in d.get("boundary_conditions", [])]
         p.analyses = [Analysis.from_dict(a) for a in d.get("analyses", [])]
         p.sketch_texts = [SketchText(**_filtered(SketchText, t)) for t in d.get("sketch_texts", [])]
+        p.reinforcements = [Reinforcement.from_dict(r) for r in d.get("reinforcements", [])]
+        p.flux_sections = [FluxSection.from_dict(f) for f in d.get("flux_sections", [])]
         p.piezometric_line = [[float(a), float(b)] for a, b in p.piezometric_line]
         return p
 
@@ -305,8 +537,7 @@ def new_project(units: str = "metric", kind: str = "slope") -> Project:
         p.grid_spacing = 2.0
     else:
         p.add_material("Soil 1", unit_weight=20.0, cohesion=5.0, phi=30.0, k_sat=1e-6)
-    if kind == "seepage":
-        p.add_analysis("Seepage", kind="seepage")
-    else:
-        p.add_analysis("Slope Stability", kind="slope")
+    names = {"slope": "Slope Stability", "seepage": "Seepage", "stress": "Stress-Deformation",
+             "dynamic": "Dynamic", "thermal": "Thermal", "transport": "Contaminant Transport", "air": "Air Flow"}
+    p.add_analysis(names.get(kind, "Slope Stability"), kind=kind if kind in names else "slope")
     return p

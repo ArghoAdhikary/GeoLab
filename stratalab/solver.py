@@ -7,7 +7,13 @@ from .slope import run_slope
 
 def solve(project, analysis, progress=None, cancel=None) -> dict:
     if analysis.kind == "seepage":
-        res = run_seepage(project, analysis, progress, cancel)
+        parent = project.analysis(analysis.parent_id)
+        pres = None
+        if parent is not None and parent.kind == "seepage":
+            if parent.results is None:
+                parent.results = run_seepage(project, parent, None, cancel)
+            pres = parent.results
+        res = run_seepage(project, analysis, progress, cancel, parent_results=pres)
     elif analysis.kind == "slope":
         seep = None
         if analysis.pwp == "seepage":

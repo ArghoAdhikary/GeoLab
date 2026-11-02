@@ -1,20 +1,20 @@
-"""Steady-state 2D seepage by the finite element method (linear triangles).
+"""2D seepage (saturated / unsaturated groundwater flow) by the finite element method.
 
-Solves div(k kr(p) grad h) = 0 for total head h. Saturated/unsaturated flow uses a
-Gardner relative conductivity kr = exp(alpha * pressure_head) for negative pressure
-head, which lets the phreatic surface develop naturally. Potential seepage faces are
-handled by the standard review iteration.
+Solves d(theta)/dt = div(k kr grad h) for total head h (Richards' equation), steady or
+transient. Unsaturated soils use Gardner or van Genuchten-Mualem functions; saturated
+storage comes from the coefficient of volume compressibility (Ss = mv * gamma_w).
+The phreatic surface develops naturally, and potential seepage faces and infiltration
+boundaries are handled by a review iteration.
 """
 from __future__ import annotations
 
 import math
 
 import numpy as np
-from scipy.sparse import coo_matrix
-from scipy.sparse.linalg import spsolve
 from scipy.spatial import Delaunay
 
-from .geometry import dist_point_polyline, point_in_polygon, validate_geometry
+from .fe import DiffusionProblem, T3, interpolator, section_flux, solve_diffusion, time_steps
+from .geometry import point_in_polygon, polyline_y, validate_geometry
 
 KR_MIN = 1e-6
 
@@ -86,171 +86,222 @@ def generate_mesh(project, size: float):
 
 
 # ---------------------------------------------------------------------------
+# Hydraulic functions
+# ---------------------------------------------------------------------------
+def water_content(m, hp, gamma_w):
+    """Volumetric water content and its derivative with respect to pressure head."""
+    hp = np.asarray(hp, float)
+    Ss = m.mv * gamma_w
+    sat = hp >= 0
+    neg = np.minimum(hp, 0.0)
+    if m.hyd_model == "saturated":
+        return m.theta_s + Ss * hp, np.full(hp.shape, Ss)
+    if m.hyd_model == "van_genuchten":
+        n = max(m.vg_n, 1.001)
+        mm = 1.0 - 1.0 / n
+        ah = m.vg_alpha * np.abs(neg)
+        base = 1.0 + ah ** n
+        unsat = m.theta_r + (m.theta_s - m.theta_r) * base ** (-mm)
+        d = (m.theta_s - m.theta_r) * mm * n * m.vg_alpha * ah ** (n - 1.0) * base ** (-mm - 1.0)
+    else:  # Gardner-type exponential
+        e = np.exp(m.unsat_alpha * neg)
+        unsat = m.theta_r + (m.theta_s - m.theta_r) * e
+        d = m.unsat_alpha * (m.theta_s - m.theta_r) * e
+    th = np.where(sat, m.theta_s + Ss * hp, unsat)
+    dth = np.where(sat, Ss, d + 1e-12)
+    return th, dth
+
+
+def relative_k(m, hp, unsaturated=True):
+    hp = np.asarray(hp, float)
+    if not unsaturated or m.hyd_model == "saturated":
+        return np.ones(hp.shape)
+    neg = np.minimum(hp, 0.0)
+    if m.hyd_model == "van_genuchten":
+        n = max(m.vg_n, 1.001)
+        mm = 1.0 - 1.0 / n
+        Se = (1.0 + (m.vg_alpha * np.abs(neg)) ** n) ** (-mm)
+        kr = np.sqrt(Se) * (1.0 - (1.0 - Se ** (1.0 / mm)) ** mm) ** 2
+    else:
+        kr = np.exp(m.unsat_alpha * neg)
+    return np.where(hp >= 0, 1.0, np.maximum(kr, KR_MIN))
+
+
+# ---------------------------------------------------------------------------
 # Solver
 # ---------------------------------------------------------------------------
-def _bc_nodes(nodes, pts, tol):
-    return [i for i, (x, y) in enumerate(nodes) if dist_point_polyline(x, y, pts) <= tol]
+class _SeepProblem(DiffusionProblem):
+    def __init__(self, project, analysis, mesh: T3):
+        self.a, self.m = analysis, mesh
+        mats = {m.id: m for m in project.materials}
+        self.mat_list = [mats[i] for i in sorted(set(mesh.mats.tolist()))]
+        self.mat_of = mats
+        self.ks = np.array([mats[i].k_sat for i in mesh.mats])
+        self.kratio = np.array([mats[i].k_ratio for i in mesh.mats])
+        if np.any(self.ks <= 0):
+            raise ValueError("Saturated hydraulic conductivity must be positive for every material.")
+        self.emask = {m.id: mesh.mats == m.id for m in self.mat_list}
+        self.w = {}                             # nodal weight of each material in the lumped storage
+        for m in self.mat_list:
+            e = self.emask[m.id]
+            a = np.bincount(mesh.tris[e].ravel(), weights=np.repeat(mesh.A[e] / 3.0, 3), minlength=mesh.nn)
+            self.w[m.id] = a / mesh.lump
+        self.y = mesh.nodes[:, 1]
+        self.gw = project.gamma_w
+        tol = 0.1 * analysis.mesh_size
+        self.bcs = []
+        self.review_nodes: set[int] = set()     # potential seepage face
+        self.infil_nodes: set[int] = set()      # infiltration with ponding review
+        self.active: set[int] = set()           # review nodes currently held at h = y
+        for bc in project.bcs("hydraulic"):
+            nodes = mesh.nodes_on(bc.points, tol)
+            if not nodes:
+                raise ValueError(f"Boundary condition '{bc.name}' does not touch any mesh node. "
+                                 "Draw it along the edge of a region.")
+            edges = mesh.edges_on(bc.points, tol)
+            edge_mat = []
+            for a, b in edges:
+                e = np.where((mesh.tris == a).any(1) & (mesh.tris == b).any(1))[0]
+                edge_mat.append(mats[mesh.mats[e[0]]])
+            self.bcs.append((bc, nodes, edges, edge_mat))
+            if bc.type == "seepage_face":
+                self.review_nodes.update(nodes)
+            elif bc.type == "infiltration":
+                self.infil_nodes.update(nodes)
+        if not any(bc.type in ("head", "pressure_head") for bc, *_ in self.bcs) and not self.review_nodes:
+            raise ValueError("At least one head or pressure-head boundary condition is required.")
+
+    def conductivity(self, h):
+        # element value = mean of the nodal relative conductivities (robust across sharp fronts)
+        hp_n = (h - self.y)[self.m.tris]
+        kr = np.ones(self.m.ne)
+        for m in self.mat_list:
+            e = self.emask[m.id]
+            kr[e] = relative_k(m, hp_n[e], self.a.unsaturated).mean(axis=1)
+        kx = self.ks * kr
+        return kx, kx * self.kratio
+
+    def storage(self, h):
+        hp = h - self.y
+        S = np.zeros(self.m.nn)
+        dS = np.zeros(self.m.nn)
+        for m in self.mat_list:
+            th, dth = water_content(m, hp, self.gw)
+            S += self.w[m.id] * th
+            dS += self.w[m.id] * dth
+        return S, dS
+
+    def boundary(self, t, h):
+        fixed: dict[int, float] = {}
+        flux = np.zeros(self.m.nn)
+        for bc, nodes, edges, edge_mat in self.bcs:
+            v = bc.at(t)
+            if bc.type == "head":
+                for i in nodes:
+                    fixed[i] = v
+            elif bc.type == "pressure_head":
+                for i in nodes:
+                    fixed[i] = self.y[i] + v
+            elif bc.type in ("flux", "infiltration"):
+                flux += self.m.edge_load(edges, v)
+            elif bc.type == "nodal_flux":
+                flux[nodes] += v / len(nodes)
+            elif bc.type == "free_drainage":          # unit downward gradient: q = -k kr
+                q = [-m.k_sat * float(relative_k(m, np.array([0.5 * (h[a] - self.y[a] + h[b] - self.y[b])]),
+                                                 self.a.unsaturated)[0]) for (a, b), m in zip(edges, edge_mat)]
+                flux += self.m.edge_load(edges, q)
+        for i in self.active:
+            fixed.setdefault(i, self.y[i])
+        return fixed, flux, None
+
+    def review(self, h, react, fixed, flux):
+        changed = False
+        big = 1e-10 * max(1.0, float(np.abs(react).max()))
+        for i in self.review_nodes | self.infil_nodes:
+            if i in self.active:
+                if react[i] > big:                    # would need extra inflow: release
+                    self.active.discard(i)
+                    changed = True
+            elif h[i] > self.y[i] + 1e-9 and i not in fixed:
+                self.active.add(i)
+                changed = True
+        return changed
 
 
-def _tributary(nodes, idx, pts):
-    """Boundary length associated with each node along a polyline (for flux loads)."""
-    if len(idx) == 1:
-        return np.array([0.0])
-    # arc-length position of each node projected on the polyline
-    seg = np.array([[*pts[i], *pts[i + 1]] for i in range(len(pts) - 1)], dtype=float)
-    cum = np.concatenate(([0.0], np.cumsum(np.hypot(seg[:, 2] - seg[:, 0], seg[:, 3] - seg[:, 1]))))
-    s = []
-    for i in idx:
-        x, y = nodes[i]
-        best, sbest = math.inf, 0.0
-        for k, (x1, y1, x2, y2) in enumerate(seg):
-            dx, dy = x2 - x1, y2 - y1
-            L2 = dx * dx + dy * dy or 1e-30
-            t = min(1.0, max(0.0, ((x - x1) * dx + (y - y1) * dy) / L2))
-            d = math.hypot(x - x1 - t * dx, y - y1 - t * dy)
-            if d < best:
-                best, sbest = d, cum[k] + t * math.sqrt(L2)
-        s.append(sbest)
-    s = np.array(s)
-    order = np.argsort(s)
-    ss = s[order]
-    gaps = np.diff(ss)
-    trib = np.zeros(len(idx))
-    trib_sorted = np.zeros(len(idx))
-    trib_sorted[:-1] += 0.5 * gaps
-    trib_sorted[1:] += 0.5 * gaps
-    trib[order] = trib_sorted
-    return trib
+def _initial_head(project, analysis, mesh, parent_results):
+    x, y = mesh.nodes[:, 0], mesh.nodes[:, 1]
+    if analysis.initial == "parent" and parent_results and parent_results.get("type") == "seepage":
+        return interpolator(parent_results["nodes"], parent_results["head"])(x, y)
+    if analysis.initial == "water_table" and len(project.piezometric_line) >= 2:
+        return np.asarray(polyline_y(project.piezometric_line, x), float)
+    if analysis.initial == "value":
+        return np.full(mesh.nn, float(analysis.initial_value))
+    return None
 
 
-def run_seepage(project, analysis, progress=None, cancel=None) -> dict:
+def run_seepage(project, analysis, progress=None, cancel=None, parent_results=None) -> dict:
     problems = validate_geometry(project)
     if problems:
         raise ValueError("; ".join(problems))
-    if not project.boundary_conditions:
+    if not project.bcs("hydraulic"):
         raise ValueError("No boundary conditions are defined. Draw at least one head boundary condition.")
     nodes, tris, tmat = generate_mesh(project, analysis.mesh_size)
-    nn, ne = len(nodes), len(tris)
-    mats = {m.id: m for m in project.materials}
-    ks = np.array([mats[m].k_sat for m in tmat])
-    kr_ratio = np.array([mats[m].k_ratio for m in tmat])
-    alpha = np.array([mats[m].unsat_alpha for m in tmat])
-    if np.any(ks <= 0):
-        raise ValueError("Saturated hydraulic conductivity must be positive for every material.")
-    P = nodes[tris]                                   # ne x 3 x 2
-    x, y = P[:, :, 0], P[:, :, 1]
-    b = np.stack([y[:, 1] - y[:, 2], y[:, 2] - y[:, 0], y[:, 0] - y[:, 1]], axis=1)
-    c = np.stack([x[:, 2] - x[:, 1], x[:, 0] - x[:, 2], x[:, 1] - x[:, 0]], axis=1)
-    A = 0.5 * (b[:, 0] * c[:, 1] - b[:, 1] * c[:, 0])
-    Kb = np.einsum("ei,ej->eij", b, b) / (4 * A)[:, None, None]
-    Kc = np.einsum("ei,ej->eij", c, c) / (4 * A)[:, None, None]
-    rows = np.repeat(tris, 3, axis=1).ravel()
-    cols = np.tile(tris, (1, 3)).ravel()
-    yc = y.mean(axis=1)
+    mesh = T3(nodes, tris, tmat)
+    prob = _SeepProblem(project, analysis, mesh)
+    steps = time_steps(analysis.duration, analysis.n_steps, analysis.step_growth) if analysis.transient else None
+    h0 = _initial_head(project, analysis, mesh, parent_results)
+    if h0 is None:
+        if steps is not None:
+            raise ValueError("A transient seepage analysis needs initial conditions: a solved parent "
+                             "seepage analysis, a water table (piezometric line) or an initial head.")
+        fixed, _, _ = prob.boundary(None, np.zeros(mesh.nn))
+        h0 = np.full(mesh.nn, max(fixed.values()) if fixed else float(nodes[:, 1].max()))
+    saved_t, saved_h = [0.0], [h0.tolist()]
+    S0 = prob.storage(h0)[0]
+    net_in = [0.0, 0.0]          # cumulative inflow, previous time
 
-    tol = 0.1 * analysis.mesh_size
-    fixed: dict[int, float] = {}
-    flux = np.zeros(nn)
-    review: set[int] = set()
-    for bc in project.boundary_conditions:
-        idx = _bc_nodes(nodes, bc.points, tol)
-        if not idx:
-            raise ValueError(f"Boundary condition '{bc.name}' does not touch any mesh node. "
-                             "Draw it along the edge of a region.")
-        if bc.type == "head":
-            for i in idx:
-                fixed[i] = bc.value
-        elif bc.type == "pressure_head":
-            for i in idx:
-                fixed[i] = nodes[i, 1] + bc.value
-        elif bc.type == "flux":
-            flux[idx] += bc.value * _tributary(nodes, idx, bc.points)
-        elif bc.type == "seepage_face":
-            review.update(i for i in idx if i not in fixed)
-        else:
-            raise ValueError(f"Unknown boundary condition type '{bc.type}'.")
-    if not fixed:
-        raise ValueError("At least one head or pressure-head boundary condition is required.")
-
-    h = np.full(nn, max(fixed.values()))
-    for i, v in fixed.items():
-        h[i] = v
-    active_review: set[int] = set()
-    converged = False
-    it = 0
-    history = []
-    for it in range(1, analysis.max_iter + 1):
-        if cancel and cancel():
-            raise RuntimeError("Cancelled")
-        if analysis.unsaturated:
-            hp_e = h[tris].mean(axis=1) - yc
-            kr = np.where(hp_e >= 0, 1.0, np.maximum(np.exp(alpha * np.minimum(hp_e, 0)), KR_MIN))
-        else:
-            kr = np.ones(ne)
-        kx = ks * kr
-        Ke = kx[:, None, None] * (Kb + kr_ratio[:, None, None] * Kc)
-        K = coo_matrix((Ke.ravel(), (rows, cols)), shape=(nn, nn)).tocsr()
-        fx = dict(fixed)
-        for i in active_review:
-            fx[i] = nodes[i, 1]
-        fidx = np.array(sorted(fx))
-        fval = np.array([fx[i] for i in fidx])
-        free = np.setdiff1d(np.arange(nn), fidx)
-        hn = np.empty(nn)
-        hn[fidx] = fval
-        rhs = flux[free] - K[free][:, fidx] @ fval
-        hn[free] = spsolve(K[free][:, free].tocsc(), rhs)
-        if not np.all(np.isfinite(hn)):
-            raise RuntimeError("The seepage solver produced invalid values. Check conductivities and boundary conditions.")
-        # seepage face review
-        react = K @ hn - flux
-        changed = False
-        for i in review:
-            if i in active_review:
-                if react[i] > 1e-12 * max(1.0, np.abs(react).max()):   # would need inflow: release
-                    active_review.discard(i); changed = True
-            elif hn[i] > nodes[i, 1] + 1e-9:
-                active_review.add(i); changed = True
-        dh = float(np.max(np.abs(hn - h)))
-        relax = 0.6 if analysis.unsaturated else 1.0
-        h = relax * hn + (1 - relax) * h if it > 1 else hn
-        history.append(dh)
+    def on_step(k, t, h, react):
+        if t is None:
+            return
+        _, flux, _ = prob.boundary(t, h)
+        net_in[0] += (t - net_in[1]) * float(react.sum() + flux.sum())
+        net_in[1] = t
+        saved_t.append(float(t))
+        saved_h.append(h.tolist())
         if progress:
-            progress(min(99, int(100 * it / analysis.max_iter)))
-        if dh < analysis.tolerance and not changed:
-            h = hn
-            converged = True
-            break
-        if not analysis.unsaturated and not review:
-            h = hn
-            converged = True
-            break
-    # final consistent fields
-    if analysis.unsaturated:
-        hp_e = h[tris].mean(axis=1) - yc
-        kr = np.where(hp_e >= 0, 1.0, np.maximum(np.exp(alpha * np.minimum(hp_e, 0)), KR_MIN))
-    else:
-        kr = np.ones(ne)
-    kx = ks * kr
-    Ke = kx[:, None, None] * (Kb + kr_ratio[:, None, None] * Kc)
-    K = coo_matrix((Ke.ravel(), (rows, cols)), shape=(nn, nn)).tocsr()
-    react = K @ h - flux
-    fixed_all = set(fixed) | active_review
-    inflow = float(sum(react[i] for i in fixed_all if react[i] > 0) + flux[flux > 0].sum())
-    outflow = float(-sum(react[i] for i in fixed_all if react[i] < 0) - flux[flux < 0].sum())
-    gx = (b * h[tris]).sum(axis=1) / (2 * A)
-    gy = (c * h[tris]).sum(axis=1) / (2 * A)
-    vx, vy = -kx * gx, -kx * kr_ratio * gy
+            progress(min(99, int(100 * (k + 1) / len(steps))))
+
+    unsat = analysis.unsaturated and any(m.hyd_model != "saturated" for m in prob.mat_list)
+    relax = (0.6 if steps is None else 0.8) if unsat else 1.0
+    h, history, converged, react, it = solve_diffusion(
+        mesh, prob, h0, steps, max_iter=analysis.max_iter, tol=analysis.tolerance, relax=relax,
+        cancel=cancel, on_step=on_step)
+    t_end = None if steps is None else float(np.sum(steps))
+    kx, ky = prob.conductivity(h)
+    _, flux, _ = prob.boundary(t_end, h)
+    if steps is None:
+        react = mesh.stiffness(kx, ky) @ h - flux
+    rate = react + flux                          # boundary inflow rate at each node
+    gx, gy = mesh.gradient(h)
+    vx, vy = -kx * gx, -ky * gy
     hp = h - nodes[:, 1]
-    return {
-        "type": "seepage", "converged": converged, "iterations": it, "history": history,
+    th = prob.storage(h)[0]
+    res = {
+        "type": "seepage", "converged": converged, "iterations": it, "history": history[-200:],
         "nodes": nodes.tolist(), "tris": tris.tolist(), "tri_material": tmat.tolist(),
         "head": h.tolist(), "pressure_head": hp.tolist(),
-        "pore_pressure": (hp * project.gamma_w).tolist(),
-        "vx": vx.tolist(), "vy": vy.tolist(), "inflow": inflow, "outflow": outflow,
-        "seepage_face_nodes": sorted(int(i) for i in active_review),
+        "pore_pressure": (hp * project.gamma_w).tolist(), "water_content": th.tolist(),
+        "vx": vx.tolist(), "vy": vy.tolist(),
+        "inflow": float(rate[rate > 0].sum()), "outflow": float(-rate[rate < 0].sum()),
+        "seepage_face_nodes": sorted(int(i) for i in prob.active if i in prob.review_nodes),
         "phreatic": phreatic_segments(nodes, tris, hp),
+        "flux_sections": {f.name: section_flux(mesh, vx, vy, f.points) for f in project.flux_sections},
     }
+    if steps is not None:
+        dV = float(np.sum(mesh.lump * (th - S0)))
+        res.update(times=saved_t, head_history=saved_h, storage_change=dV, net_inflow=net_in[0],
+                   balance_error=abs(dV - net_in[0]) / max(abs(dV), abs(net_in[0]), 1e-30))
+    return res
 
 
 def phreatic_segments(nodes, tris, hp):
@@ -261,7 +312,7 @@ def phreatic_segments(nodes, tris, hp):
 def contour_segments(nodes, tris, values, level):
     nodes = np.asarray(nodes); values = np.asarray(values)
     out = []
-    for t in np.asarray(tris):
+    for t in np.asarray(tris)[:, :3]:
         v = values[t] - level
         pts = []
         for a, b in ((0, 1), (1, 2), (2, 0)):
@@ -276,17 +327,4 @@ def contour_segments(nodes, tris, values, level):
 
 
 def pressure_head_interpolator(results):
-    from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
-    nodes = np.asarray(results["nodes"])
-    hp = np.asarray(results["pressure_head"])
-    lin = LinearNDInterpolator(nodes, hp)
-    near = NearestNDInterpolator(nodes, hp)
-
-    def f(x, y):
-        x = np.atleast_1d(np.asarray(x, dtype=float)); y = np.atleast_1d(np.asarray(y, dtype=float))
-        v = lin(x, y)
-        bad = ~np.isfinite(v)
-        if bad.any():
-            v[bad] = near(x[bad], y[bad])
-        return v
-    return f
+    return interpolator(results["nodes"], results["pressure_head"])
