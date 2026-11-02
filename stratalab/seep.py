@@ -153,7 +153,7 @@ class _SeepProblem(DiffusionProblem):
         self.review_nodes: set[int] = set()     # potential seepage face
         self.infil_nodes: set[int] = set()      # infiltration with ponding review
         self.active: set[int] = set()           # review nodes currently held at h = y
-        for bc in project.bcs("hydraulic"):
+        for bc in project.bcs("hydraulic", analysis):
             nodes = mesh.nodes_on(bc.points, tol)
             if not nodes:
                 raise ValueError(f"Boundary condition '{bc.name}' does not touch any mesh node. "
@@ -164,7 +164,7 @@ class _SeepProblem(DiffusionProblem):
                 e = np.where((mesh.tris == a).any(1) & (mesh.tris == b).any(1))[0]
                 edge_mat.append(mats[mesh.mats[e[0]]])
             self.bcs.append((bc, nodes, edges, edge_mat))
-            if bc.type == "seepage_face":
+            if bc.type in ("seepage_face", "head"):
                 self.review_nodes.update(nodes)
             elif bc.type == "infiltration":
                 self.infil_nodes.update(nodes)
@@ -197,8 +197,10 @@ class _SeepProblem(DiffusionProblem):
         for bc, nodes, edges, edge_mat in self.bcs:
             v = bc.at(t)
             if bc.type == "head":
+                # nodes above the water level are not submerged: they become potential seepage face
                 for i in nodes:
-                    fixed[i] = v
+                    if self.y[i] <= v + 1e-9:
+                        fixed[i] = v
             elif bc.type == "pressure_head":
                 for i in nodes:
                     fixed[i] = self.y[i] + v
@@ -243,7 +245,7 @@ def run_seepage(project, analysis, progress=None, cancel=None, parent_results=No
     problems = validate_geometry(project)
     if problems:
         raise ValueError("; ".join(problems))
-    if not project.bcs("hydraulic"):
+    if not project.bcs("hydraulic", analysis):
         raise ValueError("No boundary conditions are defined. Draw at least one head boundary condition.")
     nodes, tris, tmat = generate_mesh(project, analysis.mesh_size)
     mesh = T3(nodes, tris, tmat)

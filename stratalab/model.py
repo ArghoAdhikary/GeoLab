@@ -256,6 +256,7 @@ class BoundaryCondition:
     points: list[list[float]]
     value2: float = 0.0                              # second parameter (e.g. convective ambient temperature)
     fn: list = field(default_factory=list)           # [[time, value], ...] overrides value when given
+    analyses: list = field(default_factory=list)     # analysis ids it applies to; empty = all
 
     @property
     def kind(self) -> str:
@@ -487,8 +488,11 @@ class Project:
         self.flux_sections.append(f)
         return f
 
-    def bcs(self, group: str) -> list[BoundaryCondition]:
-        return [b for b in self.boundary_conditions if b.kind == group]
+    def bcs(self, group: str, analysis=None) -> list[BoundaryCondition]:
+        """Boundary conditions of one physics group, limited to those active in an analysis."""
+        aid = getattr(analysis, "id", analysis)
+        return [b for b in self.boundary_conditions
+                if b.kind == group and (aid is None or not b.analyses or aid in b.analyses)]
 
     def children(self, aid: int | None) -> list[Analysis]:
         return [a for a in self.analyses if a.parent_id == aid]

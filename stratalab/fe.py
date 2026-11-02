@@ -161,10 +161,17 @@ def _picard(mesh, prob, u, t, dt, max_iter, tol, relax, cancel, history):
             rhs = rhs + R[1]
         if dt is not None:
             S, dS = prob.storage(u_it)
+            if getattr(prob, "chord", False):      # chord slope: robust across phase-change kinks
+                d = u_it - u
+                big = np.abs(d) > 1e-8
+                dS = np.where(big, (S - S_old) / np.where(big, d, 1.0), dS)
+                dS = np.maximum(dS, 1e-12)
             M = mesh.lump * dS / dt
             rhs = rhs - mesh.lump * (S - S_old) / dt + M * u_it
             K = K + diags(M)
         un = solve_fixed(K, rhs, fixed)
+        if getattr(prob, "line_search", False) and dt is not None:
+            un = _line_search(mesh, prob, u_it, un, t, dt, S_old, fixed)
         react = K @ un - rhs
         changed = prob.review(un, react, fixed, flux)
         du = float(np.max(np.abs(un - u_it)))
@@ -173,6 +180,35 @@ def _picard(mesh, prob, u, t, dt, max_iter, tol, relax, cancel, history):
             return un, True, react, it
         u_it = relax * un + (1 - relax) * u_it if it > 1 and relax < 1 else un
     return u_it, False, react, max_iter
+
+
+def _residual(mesh, prob, u, t, dt, S_old, free):
+    kx, ky = prob.conductivity(u)
+    K = mesh.stiffness(kx, ky)
+    _, flux, R = prob.boundary(t, u)
+    r = K @ u - flux
+    if R is not None:
+        r = r + R[0] @ u - R[1]
+    r = r + mesh.lump * (prob.storage(u)[0] - S_old) / dt
+    return float(np.linalg.norm(r[free]))
+
+
+def _line_search(mesh, prob, u0, u1, t, dt, S_old, fixed):
+    """Backtrack along u0 -> u1 until the transient residual decreases (guards against the
+    two-state cycles that a kinked storage function, e.g. latent heat, can cause)."""
+    free = np.ones(mesh.nn, bool)
+    free[list(fixed)] = False
+    r0 = _residual(mesh, prob, u0, t, dt, S_old, free)
+    step = 1.0
+    while step > 1.0 / 64:
+        trial = u0 + step * (u1 - u0)
+        trial[~free] = u1[~free]
+        if _residual(mesh, prob, trial, t, dt, S_old, free) <= r0:
+            return trial
+        step *= 0.5
+    trial = u0 + step * (u1 - u0)
+    trial[~free] = u1[~free]
+    return trial
 
 
 def solve_diffusion(mesh: T3, prob: DiffusionProblem, u0, steps=None, max_iter=50, tol=1e-5,
