@@ -125,6 +125,8 @@ def slope_fe_stress() -> Project:
     """Same slope by limit equilibrium, finite element stresses and strength reduction."""
     p = homogeneous_slope()
     p.title = "Slope: limit equilibrium vs finite element"
+    p.description = ("2:1 slope, 10 m high, c' = 8 kPa, phi' = 25 deg. Limit equilibrium, the finite element "
+                     "stress method and strength reduction should agree within a few percent.")
     m = p.materials[0]
     m.cohesion, m.phi = 8.0, 25.0
     m.stress_model, m.E, m.nu = "elastic_plastic", 5e4, 0.3
@@ -156,6 +158,8 @@ def consolidation() -> Project:
 def earthquake_slope() -> Project:
     p = homogeneous_slope()
     p.title = "Earthquake: dynamic response and Newmark displacement"
+    p.description = ("2:1 slope, 10 m high, c' = 10 kPa, phi' = 25 deg. A 0.25 g, 2 Hz pulse at the base; "
+                     "the slope stability child computes the yield acceleration and Newmark displacement.")
     m = p.materials[0]
     m.cohesion, m.phi = 10.0, 25.0
     m.E, m.nu, m.damping, m.gamma_ref, m.damping_max = 1.2e5, 0.3, 0.03, 5e-4, 0.15

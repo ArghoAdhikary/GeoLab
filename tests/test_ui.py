@@ -96,9 +96,64 @@ def test_materials_dialog_validates(app):
     d.add()
     mats = d.collect()
     assert len(mats) == 2
-    d.table.item(1, 3).setText("-5")   # unit weight
+    d.fields["unit_weight"].setText("-5")      # the new material is selected
     with pytest.raises(ValueError, match="unit weight"):
         d.collect()
+    d.fields["unit_weight"].setText("abc")
+    with pytest.raises(ValueError, match="not a number"):
+        d.collect()
+    d.fields["unit_weight"].setText("18")
+    d.fields["model"].setCurrentIndex(d.fields["model"].findData("hoek_brown"))
+    d.fields["E"].setText("50000")
+    mats = d.collect()
+    assert mats[1].model == "hoek_brown" and mats[1].E == 50000 and mats[1].unit_weight == 18
+
+
+@pytest.mark.parametrize("name", ["Strip footing (stress-deformation)", "Frost penetration (thermal)",
+                                  "Reservoir drawdown (transient)", "Contaminant plume (transport)",
+                                  "Earthquake + Newmark displacement"])
+def test_results_view_for_every_analysis_type(win, app, name):
+    from stratalab.examples import EXAMPLES
+    from stratalab.ui.render import project_bounds
+    win.set_project(EXAMPLES[name]())
+    solve_all(win.project)
+    for a in win.project.analyses:
+        win.current_aid = a.id
+        win.refresh_all()
+        win.set_view("results")
+        assert win.view_mode == "results"
+        for i in range(win.field_combo.count()):
+            win.set_opt("contour", win.field_combo.itemData(i))
+            assert not win.render_image(400, 300).isNull()
+        if win.time_combo.count() > 1:
+            win.set_opt("time_index", win.time_combo.itemData(1))
+            assert not win.render_image(400, 300).isNull()
+            win.set_opt("time_index", None)
+        if a.kind != "slope":
+            x0, y0, x1, y1 = project_bounds(win.project)
+            win.show_result_info(0.5 * (x0 + x1), 0.5 * (y0 + y1))
+            assert "Result at" in win.props.toHtml()
+
+
+def test_analysis_dialog_for_every_kind(app, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from stratalab.model import ANALYSIS_KINDS, new_project
+    from stratalab.ui.dialogs import AnalysisDialog
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[2]))
+    for kind in ANALYSIS_KINDS:
+        p = new_project(kind=kind)
+        a = p.analyses[0]
+        d = AnalysisDialog(p, a)
+        if kind == "dynamic":
+            d.forms[0].w["motion"].setPlainText("0, 0\n1, 0.1\n2, 0")
+        d.try_accept()
+        if kind == "transport":      # no seepage parent: refused with a message
+            assert d.result() != 1 and "seepage" in warnings[-1]
+        else:
+            assert d.result() == 1, (kind, warnings)
+        if kind == "dynamic":
+            assert a.motion == [[0, 0], [1, 0.1], [2, 0]]
 
 
 def test_save_open_roundtrip_through_window(win, tmp_path):

@@ -2,10 +2,17 @@
 
 2D geotechnical analysis for Windows and macOS:
 
-- **Slope stability** by limit equilibrium: Ordinary, Bishop, Janbu, Spencer and Morgenstern-Price,
-  with slip surface searches, water tables, loads, earthquake coefficient, probability and sensitivity.
-- **Seepage** by the finite element method: steady-state saturated/unsaturated flow with a free
-  phreatic surface, whose pore pressures can feed a stability analysis.
+- **Slope stability** by limit equilibrium: 11 methods (Bishop, Spencer, Morgenstern-Price, Janbu,
+  Corps of Engineers, Lowe-Karafiath, Sarma, ...) plus the finite element stress method; 10 strength
+  models; reinforcement, tension cracks, ponded water; six slip surface searches and optimization;
+  probability, sensitivity and Newmark earthquake displacement.
+- **Seepage**: steady and transient, saturated / unsaturated flow with a free phreatic surface.
+- **Stress-deformation**: in situ stresses, load-deformation with Mohr-Coulomb plasticity, strength
+  reduction factor of safety and coupled consolidation.
+- **Dynamic**: earthquake response with equivalent linear soil behaviour.
+- **Thermal** (with freezing and thawing), **contaminant transport** (with particle tracking) and **air flow**.
+- Analyses are linked: seepage feeds slope stability, stress and transport; stresses feed the finite
+  element slope method; earthquakes feed Newmark displacement.
 - **AI Slope Builder**: describe a slope in plain language and Claude sets up the model.
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
 
@@ -97,10 +104,17 @@ GitHub Actions (`.github/workflows/build.yml`) tests and builds on Windows and m
 and attaches the zipped apps to a GitHub release when you push a tag such as `v1.0.0`.
 
 ## Validation
-- ACADS 1(a) homogeneous slope (published referee F ~ 1.00): Bishop 0.985, Morgenstern-Price 0.984.
-- Undrained (phi = 0) slope: all moment methods agree with a direct numerical integration within 0.5 %.
-- Confined seepage: matches the exact linear solution to machine precision.
-- Rectangular dam: flow within 1.6 % of the Dupuit discharge (exact for this case).
+Every solver is checked by automated tests against closed-form solutions or published benchmarks:
+- ACADS 1(a) homogeneous slope (referee F ~ 1.00): Bishop 0.985, Morgenstern-Price 0.984; all 11 methods within 1.5 %.
+- Griffiths & Lane slope: Bishop 1.386 (published 1.38), strength reduction 1.36 (published ~1.4).
+- Prandtl bearing capacity: 5.10 su (exact 5.14 su).
+- Terzaghi consolidation and transient seepage: within 2 % of the series solution.
+- Seepage: exact confined flow, Dupuit dam within 1.6 %, unsaturated infiltration mass balance < 2 %.
+- Heat: erfc conduction, Stefan frost front within 1.4 %, energy balance < 0.01 %.
+- Transport: Ogata-Banks, retardation, particle travel time.
+- Dynamic: layer frequency Vs/4H within 2 %, amplification within 3 %, Newmark sliding block within 0.5 %.
+
+See [FEATURES.md](FEATURES.md) for the full list.
 
 Results are only as good as the model. Check inputs and results independently before relying on them.
 

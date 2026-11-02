@@ -63,9 +63,13 @@ def export_results_csv(project: Project, analysis, path):
             for row in rows:
                 w.writerow(list(row.values()))
         else:
-            w.writerow(["node", "x", "y", "total_head", "pressure_head", "pore_pressure"])
-            for i, (xy, h, hp, u) in enumerate(zip(r["nodes"], r["head"], r["pressure_head"], r["pore_pressure"])):
-                w.writerow([i + 1, xy[0], xy[1], h, hp, u])
+            # every nodal field of the result (same length as the node list)
+            n = len(r["nodes"])
+            keys = [k for k, v in r.items() if isinstance(v, list) and len(v) == n and k != "nodes"
+                    and v and not isinstance(v[0], (list, dict))]
+            w.writerow(["node", "x", "y", *keys])
+            for i, xy in enumerate(r["nodes"]):
+                w.writerow([i + 1, xy[0], xy[1], *(r[k][i] for k in keys)])
 
 
 def import_points_csv(path) -> list[list[float]]:

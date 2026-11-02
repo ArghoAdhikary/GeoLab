@@ -1,53 +1,91 @@
 # Feature status
 
 "Tested" means covered by an automated test in `tests/` or checked by running the built app.
+Accuracy is checked against closed-form solutions and published benchmarks (the same kind of
+problems commercial programs use in their verification manuals). No result has been compared
+directly with another vendor's software.
 
 ## Implemented
 
-| Area | Feature | Verified by |
-|---|---|---|
-| App | Start page (new, open, examples, recent, AI builder, units) | built app, `test_ui.py` |
-| App | Project explorer with parent/child analyses, properties panel, solve manager | built app screenshot |
-| App | Definition / results views, zoom, pan, grid, snap, axes | `test_ui.py`, screenshots |
-| App | Undo / redo (60 steps) | `test_draw_region_with_mouse_and_undo` |
-| Draw | Regions by mouse (snap to grid and points), drag points, delete | `test_ui.py` |
-| Draw | Assign materials, piezometric line, boundary conditions, point loads, surcharges, entry/exit, grid, sketch text | `test_ui.py` (assign, entry/exit), manual |
-| Define | Project properties, units (metric/imperial), materials table with validation | `test_materials_dialog_validates` |
-| Define | Analysis settings, typed point lists, boundary condition and load editors | manual |
-| Slope | Ordinary, Bishop, Janbu (uncorrected), Spencer, Morgenstern-Price (half-sine / constant) | `test_slope.py` |
-| Slope | ACADS 1(a) benchmark (reference F ~ 1.00): Bishop 0.985, M-P 0.984 | `test_acads_1a_benchmark` |
-| Slope | phi = 0 case checked against direct numerical integration (< 0.5 %) | `test_undrained_methods_agree...` |
-| Slope | Entry-and-exit, grid-and-radius, fully specified circles and polylines | `test_slope.py` |
-| Slope | Mohr-Coulomb, undrained, bedrock (impenetrable) materials | `test_slope.py` |
-| Slope | Pore pressure: piezometric line, Ru, from seepage analysis | `test_slope.py`, `test_seep.py` |
-| Slope | Seismic coefficient kh, surcharge and point loads | `test_slope.py` |
-| Slope | Monte Carlo probability of failure, reliability index, histogram | `test_probabilistic_*` |
-| Slope | Sensitivity of F to one material property | `test_sensitivity_*` |
-| Slope | Slice information table, trial surfaces drawn by F | built app |
-| Seepage | Automatic triangle mesh | `test_mesh_covers_region_area` |
-| Seepage | Steady-state saturated and saturated/unsaturated flow, anisotropy | `test_seep.py` |
-| Seepage | Head, pressure head, unit flux, potential seepage face boundaries | `test_seep.py` |
-| Seepage | Confined flow exact; rectangular dam within 5 % of Dupuit (measured 1.6 %) | `test_seep.py` |
-| Seepage | Head / pressure contours, phreatic line, flow vectors, click to read values | screenshots |
-| Files | `.slab` save/open, JSON export, CSV results, CSV point import, PNG, clipboard | `test_io.py` |
-| Files | PDF export (drawing + full report) and printing | `test_ui.py`, `test_cli_solve`, PDF inspected |
-| Batch | `stratalab solve` command line with `--save`, `--pdf`, `--csv` | `test_cli_solve` |
-| AI | AI Slope Builder (Claude, JSON-schema output, validated before use) | `test_ai.py` with a fake client |
-| Build | Windows executable (PyInstaller) | built and run on Windows 11 |
+### Slope stability (limit equilibrium)
+
+| Feature | Verified by |
+|---|---|
+| Ordinary, Bishop, Janbu simplified (uncorrected and with f0), Janbu generalized, Spencer, Morgenstern-Price (half-sine, constant, clipped sine, trapezoidal, data points), Corps of Engineers #1 and #2, Lowe-Karafiath, Sarma | ACADS 1(a): all within 1.5 % of M-P 0.984 (referee ~1.00), `test_slope_advanced.py` |
+| Griffiths & Lane 2:1 slope: Bishop 1.386 (published 1.38) | `test_strength_reduction_matches_limit_equilibrium` |
+| Strength models: Mohr-Coulomb, undrained, undrained increasing with depth, SHANSEP, bilinear, shear/normal function, generalized Hoek-Brown, anisotropic, high strength, bedrock; unsaturated strength (phi-b) | equivalence tests, Hoek-Brown envelope vs closed form |
+| Pore pressure: piezometric line, Ru, seepage (steady or transient), ponded water | fully submerged c = 0 slope equals the dry slope (within 0.5 %) |
+| Seismic kh and kv, surcharges, point loads | `test_slope.py` |
+| Reinforcement: anchors (bonded length), nails, geosynthetics, piles; F-dependent or not; pullout limited by bond beyond the slip surface | `test_reinforcement_raises_fos`, anchor bond test |
+| Tension crack by depth or base angle, with water | `test_tension_crack_with_water_lowers_fos` |
+| Searches: entry and exit, grid and radius, grid and tangent lines, block, auto locate, fully specified circles and polylines; optimization | search tests; optimized surface independent of slice count |
+| Slice boundaries at every slip-surface vertex and ground corner | `test_optimization_is_slice_independent_and_lower` |
+| Finite element stress method (stresses from a stress analysis) | within 5 % of LE and strength reduction (`test_examples.py`) |
+| Probabilistic (normal, lognormal, uniform), sensitivity | `test_lognormal_probabilistic`, `test_slope.py` |
+| Newmark sliding-block displacement from a dynamic analysis | rectangular pulse vs closed form (0.5 %) |
+
+### Seepage (finite element)
+
+| Feature | Verified by |
+|---|---|
+| Steady and transient, saturated / unsaturated (Gardner, van Genuchten-Mualem), storage from mv | Terzaghi diffusion at Tv = 0.05, 0.2, 0.6 within 1.5 %; mass balance < 2 % for unsaturated infiltration |
+| Head (time functions), pressure head, unit flux, nodal flux, seepage face, infiltration with ponding review, free drainage | `test_seep.py`, `test_seep_transient.py` |
+| Head boundaries above the water level become seepage faces (drawdown) | drawdown example |
+| Flux sections | matches boundary flow (0.1 %) |
+| Automatic time-step cutting when a step does not converge | infiltration into dry soil |
+
+### Stress-deformation (6-node triangles, plane strain)
+
+| Feature | Verified by |
+|---|---|
+| In situ (gravity) with effective stresses below the water table | sigma_v = gamma z, K0 on effective stress (2 %) |
+| Load-deformation in steps, pressure / shear / force / displacement boundaries, reactions | 1D compression exact (0.1 %) |
+| Elastic-perfectly plastic Mohr-Coulomb (non-associated), viscoplastic algorithm | Prandtl strip footing 5.10 su vs 5.14 su exact |
+| Strength reduction factor of safety | Griffiths & Lane slope 1.36 (published ~1.4) |
+| Coupled Biot consolidation | Terzaghi excess pore pressure and degree of consolidation (2-3 %) |
+
+### Dynamic (earthquake)
+
+| Feature | Verified by |
+|---|---|
+| Newmark time integration, consistent mass, Rayleigh damping per element, base acceleration | layer natural frequency Vs/4H (2 %) |
+| Equivalent linear (hyperbolic G/Gmax and damping) | runs to convergence in the example |
+| Amplification | 1 / cos(wH/Vs) below resonance (3 %) |
+
+### Thermal, contaminant transport, air flow
+
+| Feature | Verified by |
+|---|---|
+| Conduction with freezing / thawing (enthalpy, chord capacity, line search) | erfc solution (0.15 C); Stefan frost front (1.4 %); energy balance < 0.01 % |
+| Temperature, heat flux and convective boundaries, time functions | series-resistance convection (0.1 %) |
+| Advection-dispersion with adsorption and decay; streamline stabilization when needed | Ogata-Banks (0.02 abs); retardation front |
+| Particle tracking | travel distance v t / R (2 %) |
+| Air flow (steady / transient) with saturation from seepage | exact steady flux |
+
+### Application
+
+| Feature | Verified by |
+|---|---|
+| Start page, project explorer with parent / child analyses, properties, solve manager | built app, `test_ui.py` |
+| Drawing tools incl. reinforcement and flux sections; undo / redo | `test_ui.py` |
+| Materials dialog with tabs per physics; analysis settings per analysis type; boundary conditions limited to one analysis | `test_ui.py` |
+| Results: any field, any saved time, deformed mesh, yield zones, vectors, particle paths, point read-out, graphs vs time | `test_results_view_for_every_analysis_type` |
+| Files: `.slab`, JSON, CSV (every nodal field), PNG, PDF, printing; command-line batch solver | `test_io.py` |
+| AI Slope Builder (Claude) | fake client only |
+| Windows and macOS builds | GitHub Actions |
 
 ## Not implemented
 
 | Feature | Notes |
 |---|---|
-| Stress-deformation, dynamic (earthquake time history), thermal, contaminant and air-flow analyses | Each is a separate finite element product; out of scope for 1.0. |
-| 3D geometry and 3D slope stability | 2D only. |
-| Transient (time-dependent) seepage, climate boundaries | Steady state only. |
-| Reinforcement (anchors, nails, geosynthetics, piles), tension cracks, ponded water loads, partial factors | Not modelled. Ponded water above the ground is ignored. |
-| Strength functions (shear-normal, anisotropic, spatially varying), unsaturated strength (suction) | Constant Mohr-Coulomb / undrained parameters only; negative pore pressure is set to zero. |
-| Slip surface optimization, block search, multiple tangent lines | Grid uses a radius range rather than tangent lines. |
-| Janbu correction factor f0 | Janbu Simplified is reported uncorrected. |
-| Unit conversion when switching unit systems | Switching relabels values; it does not convert them. |
-| `.gsz` import/export | Deliberately not supported: that is a proprietary format of another vendor. Use `.slab`, JSON or CSV. |
-| macOS build tested on a Mac | The GitHub Actions workflow builds and tests on macOS, but it has not been run yet. |
-| Code signing / notarization | Builds are unsigned; Windows SmartScreen and macOS Gatekeeper will warn on first launch. |
-| Live Claude API call | Tested with a fake client only; no API key was available during development. |
+| 3D geometry and 3D analyses | 2D only. |
+| Climate / evaporation boundaries, density-dependent flow, freezing-induced water migration | |
+| Advanced soil models (Cam Clay, hardening soil, hysteretic cyclic models, liquefaction, pore pressure generation in dynamic analysis) | Mohr-Coulomb and equivalent linear only. |
+| Structural elements in stress analysis (beams, anchors, geogrids) | Reinforcement exists in slope stability only. |
+| Staged construction (adding / removing regions between stages) | Stages share one geometry. |
+| Consolidation with plasticity | Consolidation is linear elastic. |
+| Rapid drawdown by the Duncan-Wright-Wong method | Use transient seepage then slope stability. |
+| Unit conversion when switching unit systems | Switching relabels values. |
+| `.gsz` import/export | Not supported: another vendor's proprietary format. |
+| Code signing / notarization | Builds are unsigned. |
+| Live Claude API call | Tested with a fake client only. The AI builder sets up slope models. |

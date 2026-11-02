@@ -13,7 +13,56 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, Q
 
 from ..geometry import GroundProfile, bounds, polygon_area
 
-BC_COLORS = {"head": "#1f5fd1", "pressure_head": "#14a3b8", "flux": "#2e9d3a", "seepage_face": "#e07b00"}
+BC_COLORS = {"head": "#1f5fd1", "pressure_head": "#14a3b8", "flux": "#2e9d3a", "seepage_face": "#e07b00",
+             "nodal_flux": "#2e9d3a", "infiltration": "#2aa198", "free_drainage": "#6c71c4",
+             "fixed_x": "#555555", "fixed_y": "#555555", "fixed_xy": "#222222", "pressure": "#b0306a",
+             "shear": "#b0306a", "force_x": "#b0306a", "force_y": "#b0306a", "displacement_y": "#d33682",
+             "temperature": "#d1401f", "heat_flux": "#e07b00", "convective": "#cb4b16",
+             "concentration": "#6b0080", "mass_flux": "#8e44ad", "free_exit": "#9b59b6",
+             "air_pressure": "#268bd2", "air_flux": "#2aa198"}
+
+# contour fields per result type: key -> (label, unit key, per element)
+FIELDS = {
+    "seepage": {"head": ("Total head", "length", False), "pressure_head": ("Pressure head", "length", False),
+                "pore_pressure": ("Pore-water pressure", "pressure", False),
+                "water_content": ("Volumetric water content", "", False)},
+    "stress": {"sy": ("Vertical total stress", "pressure", False), "sx": ("Horizontal total stress", "pressure", False),
+               "txy": ("Shear stress", "pressure", False), "sy_eff": ("Vertical effective stress", "pressure", False),
+               "sx_eff": ("Horizontal effective stress", "pressure", False),
+               "pwp": ("Pore-water pressure", "pressure", False),
+               "s1": ("Major principal stress", "pressure", False), "s3": ("Minor principal stress", "pressure", False),
+               "q": ("Deviatoric stress", "pressure", False), "displacement": ("Displacement", "length", False),
+               "dx": ("x-displacement", "length", False), "dy": ("y-displacement", "length", False),
+               "excess_pwp": ("Excess pore pressure", "pressure", False)},
+    "dynamic": {"max_acceleration": ("Peak horizontal acceleration (g)", "", False),
+                "max_displacement": ("Peak relative displacement", "length", False),
+                "G_ratio": ("G / Gmax", "", True), "damping": ("Damping ratio", "", True),
+                "max_shear_strain": ("Peak shear strain", "", True)},
+    "thermal": {"temperature": ("Temperature", "temperature", False),
+                "frozen_fraction": ("Frozen fraction", "", False)},
+    "transport": {"concentration": ("Concentration", "concentration", False)},
+    "air": {"air_pressure": ("Air pressure", "pressure", False)},
+}
+HISTORY = {("thermal", "temperature"): "temperature_history",
+           ("transport", "concentration"): "concentration_history", ("air", "air_pressure"): "pressure_history",
+           ("stress", "excess_pwp"): "excess_history"}
+VECTORS = {"seepage": ("vx", "vy"), "thermal": ("qx", "qy"), "air": ("vx", "vy")}
+
+
+def default_field(res):
+    return next(iter(FIELDS[res["type"]]))
+
+
+def available_fields(res):
+    """Contour fields present in a result dict: [(key, label)]."""
+    if not res or res.get("type") not in FIELDS:
+        return []
+    return [(k, spec[0]) for k, spec in FIELDS[res["type"]].items() if k == "displacement" and "dx" in res or k in res]
+
+
+def result_times(res):
+    """Saved times of a transient result (empty for steady)."""
+    return list(res.get("times") or []) if res else []
 WATER = QColor("#2f6fe0")
 
 
@@ -122,17 +171,19 @@ class Renderer:
         if self.o["grid"]:
             self.draw_grid()
         res = self.a.results if self.a else None
-        seep_res = res if (res and res.get("type") == "seepage") else None
-        if self.mode == "results" and seep_res:
+        field_res = res if (res and res.get("type") in FIELDS) else None
+        if self.mode == "results" and field_res:
             self.draw_regions(fill=False)
-            self.draw_seepage(seep_res)
+            self.draw_field(field_res)
         else:
             self.draw_regions(fill=True)
         if self.o["axes"]:
             self.draw_axes()
         self.draw_water_and_loads()
-        if self.a is None or self.a.kind == "seepage" or self.mode == "define":
+        if self.mode == "define" or (self.a is not None and self.a.kind != "slope"):
             self.draw_bcs()
+        self.draw_reinforcement()
+        self.draw_flux_sections(field_res if self.mode == "results" else None)
         if self.a and self.a.kind == "slope":
             if self.mode == "results" and res and res.get("type") == "slope":
                 self.draw_slope_results(res)
@@ -293,7 +344,7 @@ class Renderer:
                 g.setPen(QColor("#d01f1f"))
                 d = v.dev(*pts[len(pts) // 2])
                 g.drawText(QRectF(d.x() - 40, d.y() - 26, 80, 16), Qt.AlignCenter, label)
-        elif st.mode == "grid_radius" and st.grid_x1 != st.grid_x2:
+        elif st.mode in ("grid_radius", "grid_tangent") and st.grid_x1 != st.grid_x2:
             g.setPen(self.pen("#d01f1f", 1.2, Qt.DashLine))
             g.setBrush(Qt.NoBrush)
             a, b = v.dev(st.grid_x1, st.grid_y1), v.dev(st.grid_x2, st.grid_y2)
@@ -302,6 +353,25 @@ class Renderer:
             for x in np.linspace(st.grid_x1, st.grid_x2, max(1, st.grid_nx)):
                 for y in np.linspace(st.grid_y1, st.grid_y2, max(1, st.grid_ny)):
                     g.drawPoint(v.dev(x, y))
+            if st.mode == "grid_tangent":
+                x0, _, x1, _ = project_bounds(self.p)
+                g.setPen(self.pen("#d01f1f", 1, Qt.DotLine))
+                for y in np.linspace(st.tangent_y1, st.tangent_y2, max(1, st.n_tangent)):
+                    g.drawLine(v.dev(x0, y), v.dev(x1, y))
+        elif st.mode == "block":
+            g.setBrush(Qt.NoBrush)
+            for rect, label in ((st.block_left, "Left block"), (st.block_right, "Right block")):
+                if rect[0] == rect[2] and rect[1] == rect[3]:
+                    continue
+                a, b = v.dev(rect[0], rect[1]), v.dev(rect[2], rect[3])
+                g.setPen(self.pen("#d01f1f", 1.2, Qt.DashLine))
+                g.drawRect(QRectF(a, b).normalized())
+                g.setPen(self.pen("#d01f1f", 3))
+                for x in np.linspace(rect[0], rect[2], max(1, st.block_n)):
+                    for y in np.linspace(rect[1], rect[3], max(1, st.block_n)):
+                        g.drawPoint(v.dev(x, y))
+                g.setFont(self.font(8, True))
+                g.drawText(QRectF(a, b).normalized().topLeft() + QPointF(0, -4), label)
         elif st.mode == "fully_specified":
             g.setPen(self.pen("#d01f1f", 1.5, Qt.DashLine))
             g.setBrush(Qt.NoBrush)
@@ -382,38 +452,80 @@ class Renderer:
         r = self.v.rect
         self.g.drawText(QRectF(r.left(), r.top() + 10, r.width(), 30), Qt.AlignCenter, text)
 
-    def draw_seepage(self, res):
+    def field_values(self, res):
+        """(values, per_element, label, unit) of the selected contour field and time step."""
+        spec = FIELDS[res["type"]]
+        key = self.o.get("contour")
+        if key not in spec or (key != "displacement" and key not in res):
+            key = default_field(res)
+        label, unit_key, per_elem = spec[key]
+        idx = self.o.get("time_index")
+        y = np.asarray(res["nodes"], float)[:, 1]
+        heads = res.get("head_history") if res["type"] == "seepage" else None
+        if key == "displacement":
+            vals = np.hypot(res["dx"], res["dy"])
+        elif heads and idx is not None and 0 <= idx < len(heads) and key in ("head", "pressure_head", "pore_pressure"):
+            h = np.asarray(heads[idx], float)
+            vals = {"head": h, "pressure_head": h - y, "pore_pressure": (h - y) * self.p.gamma_w}[key]
+        else:
+            hist = res.get(HISTORY.get((res["type"], key), ""))
+            if hist and idx is not None and 0 <= idx < len(hist):
+                vals = np.asarray(hist[idx], float)
+            else:
+                vals = np.asarray(res[key], float)
+        return vals, per_elem, label, (self.p.unit(unit_key) if unit_key else "")
+
+    def draw_field(self, res):
         g, v = self.g, self.v
-        nodes = np.asarray(res["nodes"])
-        tris = np.asarray(res["tris"])
-        field = np.asarray(res["head"] if self.o["contour"] == "head" else res["pressure_head"])
-        lo, hi = float(field.min()), float(field.max())
+        nodes = np.asarray(res["nodes"], float)
+        tris = np.asarray(res["tris"], int)
+        field, per_elem, label, unit = self.field_values(res)
+        if res["type"] == "stress" and self.o.get("deformed"):
+            disp = np.column_stack([res["dx"], res["dy"]])
+            dmax = float(np.abs(disp).max())
+            if dmax > 0:
+                x0, y0, x1, y1 = project_bounds(self.p)
+                nodes = nodes + disp * (0.06 * max(x1 - x0, y1 - y0) / dmax) * self.o.get("exaggeration", 1.0)
+        finite = field[np.isfinite(field)]
+        lo, hi = (float(finite.min()), float(finite.max())) if len(finite) else (0.0, 1.0)
         span = hi - lo if hi > lo else 1.0
         dev = [v.dev(x, y) for x, y in nodes]
-        if self.o["mesh"]:
-            g.setPen(self.pen(QColor(0, 0, 0, 70), 0.6))
-        else:
-            g.setPen(Qt.NoPen)
-        vals = field[tris].mean(axis=1)
+        g.setPen(self.pen(QColor(0, 0, 0, 70), 0.6) if self.o["mesh"] else Qt.NoPen)
+        vals = field if per_elem else field[tris].mean(axis=1)
         for t, val in zip(tris, vals):
-            g.setBrush(colormap((val - lo) / span))
+            g.setBrush(colormap((val - lo) / span) if np.isfinite(val) else QColor("#dddddd"))
             g.drawPolygon(QPolygonF([dev[t[0]], dev[t[1]], dev[t[2]]]))
-        # contour lines
-        from ..seep import contour_segments
-        g.setPen(self.pen(QColor(30, 30, 30, 140), 0.8))
-        step = nice_step(span, 10)
-        level = math.ceil(lo / step) * step
-        while level < hi:
-            for x1, y1, x2, y2 in contour_segments(nodes, tris, field, level):
+        if not per_elem and hi > lo:
+            from ..seep import contour_segments
+            g.setPen(self.pen(QColor(30, 30, 30, 140), 0.8))
+            step = nice_step(span, 10)
+            level = math.ceil(lo / step) * step
+            while level < hi:
+                for x1, y1, x2, y2 in contour_segments(nodes, tris, field, level):
+                    g.drawLine(v.dev(x1, y1), v.dev(x2, y2))
+                level += step
+        if res["type"] == "seepage":
+            from ..seep import phreatic_segments
+            idx = self.o.get("time_index")
+            heads = res.get("head_history")
+            if heads and idx is not None and 0 <= idx < len(heads):
+                ph = phreatic_segments(nodes, tris, np.asarray(heads[idx]) - nodes[:, 1])
+            else:
+                ph = res["phreatic"]
+            g.setPen(self.pen(WATER, 2.6))
+            for x1, y1, x2, y2 in ph:
                 g.drawLine(v.dev(x1, y1), v.dev(x2, y2))
-            level += step
-        g.setPen(self.pen(WATER, 2.6))
-        for x1, y1, x2, y2 in res["phreatic"]:
-            g.drawLine(v.dev(x1, y1), v.dev(x2, y2))
-        if self.o["vectors"]:
-            vx, vy = np.asarray(res["vx"]), np.asarray(res["vy"])
+        if res["type"] == "stress" and self.o.get("yield", True) and any(res.get("yielded", [])):
+            g.setPen(Qt.NoPen)
+            g.setBrush(QColor(220, 0, 160, 120))
+            for t, yl in zip(tris, res["yielded"]):
+                if yl:
+                    g.drawPolygon(QPolygonF([dev[t[0]], dev[t[1]], dev[t[2]]]))
+        vec = VECTORS.get(res["type"])
+        if self.o["vectors"] and vec and res.get(vec[0]):
+            vx, vy = np.asarray(res[vec[0]]), np.asarray(res[vec[1]])
             mag = np.hypot(vx, vy)
-            vmax = mag.max() if mag.max() > 0 else 1
+            vmax = mag.max() if mag.size and mag.max() > 0 else 1
             cent = nodes[tris].mean(axis=1)
             stride = max(1, len(tris) // 350)
             g.setPen(self.pen("#101010", 1))
@@ -425,9 +537,46 @@ class Renderer:
                 a = v.dev(*cent[i])
                 d = QPointF(vx[i] / mag[i] * L, -vy[i] / mag[i] * L)
                 self.arrow(a, a + d, 4)
-        self.draw_colorbar(lo, hi, "Total head" if self.o["contour"] == "head" else "Pressure head")
+        if res["type"] == "transport":
+            for prt in res.get("particles", []):
+                g.setPen(self.pen("#6b0080", 1.8))
+                g.drawPolyline(self.poly(prt["path"]))
+                g.setBrush(QColor("#6b0080"))
+                g.drawEllipse(v.dev(*prt["start"]), 3, 3)
+        self.draw_colorbar(lo, hi, label, unit)
 
-    def draw_colorbar(self, lo, hi, label):
+    def draw_reinforcement(self):
+        g = self.g
+        for r in getattr(self.p, "reinforcements", []):
+            a, b = self.v.dev(r.x1, r.y1), self.v.dev(r.x2, r.y2)
+            g.setPen(self.pen("#7a4b00", 2.6))
+            g.drawLine(a, b)
+            if r.type == "anchor" and r.bond_length > 0:
+                L = math.hypot(r.x2 - r.x1, r.y2 - r.y1)
+                if L > 0:
+                    t = max(0.0, 1 - r.bond_length / L)
+                    c = self.v.dev(r.x1 + t * (r.x2 - r.x1), r.y1 + t * (r.y2 - r.y1))
+                    g.setPen(self.pen("#7a4b00", 6))
+                    g.drawLine(c, b)
+            g.setBrush(QColor("#7a4b00"))
+            g.setPen(self.pen("#7a4b00", 1))
+            g.drawRect(QRectF(a.x() - 3, a.y() - 3, 6, 6))
+
+    def draw_flux_sections(self, res):
+        g = self.g
+        values = (res or {}).get("flux_sections", {})
+        for f in getattr(self.p, "flux_sections", []):
+            if len(f.points) < 2:
+                continue
+            g.setPen(self.pen("#00897b", 2, Qt.DashDotLine))
+            g.drawPolyline(self.poly(f.points))
+            if self.o["labels"]:
+                g.setFont(self.font(8, True))
+                d = self.v.dev(*f.points[-1])
+                txt = f.name if f.name not in values else f"{f.name}: {values[f.name]:.3g} {self.p.unit('flux')}"
+                g.drawText(QPointF(d.x() + 4, d.y() - 4), txt)
+
+    def draw_colorbar(self, lo, hi, label, unit=""):
         g = self.g
         r = self.v.rect
         x, y, w, h = r.right() - 46, r.top() + 30, 14, min(220.0, r.height() * 0.5)
@@ -438,11 +587,10 @@ class Renderer:
         g.setBrush(Qt.NoBrush)
         g.drawRect(QRectF(x, y, w, h))
         g.setFont(self.font(8))
-        u = self.p.unit("length")
-        g.drawText(QRectF(x - 100, y - 22, 140, 16), Qt.AlignRight, f"{label} ({u})")
+        g.drawText(QRectF(x - 200, y - 22, 240, 16), Qt.AlignRight, f"{label} ({unit})" if unit else label)
         for k in range(5):
             val = hi - k * (hi - lo) / 4
-            g.drawText(QRectF(x - 60, y + k * h / 4 - 7, 56, 14), Qt.AlignRight | Qt.AlignVCenter, f"{val:.2f}")
+            g.drawText(QRectF(x - 80, y + k * h / 4 - 7, 76, 14), Qt.AlignRight | Qt.AlignVCenter, f"{val:.4g}")
 
     def draw_sketch(self):
         g = self.g

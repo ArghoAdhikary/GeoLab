@@ -449,10 +449,10 @@ def run_consolidation(project, analysis, progress=None, cancel=None, parent=None
         x[free] = spsolve(A[free][:, free].tocsc(), rhs[free] - A[free][:, cidx] @ x[cidx])
         return x[:nd], x[nd:]
 
-    top = np.argmax(mesh.nodes3[:, 1])
+    dy_hist = []
     u, p = step(0.0, F_bc)                                # undrained loading
     p_hist.append(p.tolist())
-    settle.append(float(-u[2 * top + 1]))
+    dy_hist.append(u[1:2 * mesh.n3:2].copy())
     t = 0.0
     for k, dt in enumerate(steps):
         if cancel and cancel():
@@ -461,9 +461,11 @@ def run_consolidation(project, analysis, progress=None, cancel=None, parent=None
         t += dt
         times.append(t)
         p_hist.append(p.tolist())
-        settle.append(float(-u[2 * top + 1]))
+        dy_hist.append(u[1:2 * mesh.n3:2].copy())
         if progress:
             progress(int(100 * (k + 1) / len(steps)))
+    top = int(np.argmin(dy_hist[-1]))                     # monitor the point that settles most
+    settle = [float(-d[top]) for d in dy_hist]
     sig = sig0 + np.einsum("eij,egj->egi", model.D, _strain(mesh, u))
     u_gp = _pore_pressure(project, analysis, mesh.gx, mesh.gy, seep_results) + np.einsum("gk,ek->eg", mesh.Np, p[mesh.tris3])
     return _results(project, mesh, model, u, sig, u_gp, analysis, {

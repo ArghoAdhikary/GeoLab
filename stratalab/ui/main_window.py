@@ -8,22 +8,26 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QThread, Signal
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence, QPainter
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QInputDialog, QLabel,
-                               QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QStyle,
-                               QTextBrowser, QToolBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog,
+                               QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
+                               QStyle, QTextBrowser, QToolBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, FILE_EXT, __version__
 from ..examples import EXAMPLES
 from ..fileio import export_json, export_results_csv, import_points_csv, load_project, save_project
 from ..geometry import polygon_area
-from ..model import BC_TYPES, SLOPE_METHODS, Project, new_project
+from ..model import (ANALYSIS_KINDS, BC_KINDS, BC_TYPES, KIND_BCS, REINFORCEMENT_TYPES, SLOPE_METHODS, Project,
+                     new_project)
 from ..report import build_report
 from ..solver import solve, verify
 from .canvas import Canvas
 from .dialogs import (AIDialog, AnalysisDialog, BCDialog, GraphDialog, MaterialsDialog, PointsDialog,
-                      ProjectDialog, SliceTable, StartPage, TextDialog)
+                      ProjectDialog, ReinforcementDialog, SliceTable, StartPage, TextDialog)
 from .pdf import export_pdf, paint_pages
-from .render import Renderer, View, project_bounds
+from .render import Renderer, View, available_fields, project_bounds, result_times
+
+KIND_SHORT = {"slope": "Slope", "seepage": "Seepage", "stress": "Stress", "dynamic": "Dynamic",
+              "thermal": "Thermal", "transport": "Transport", "air": "Air flow"}
 
 FILTER = f"{APP_NAME} project (*{FILE_EXT});;JSON project (*.json)"
 MAX_UNDO = 60
@@ -63,9 +67,12 @@ class MainWindow(QMainWindow):
         self.current_aid = self.project.analyses[0].id
         self.view_mode = "define"
         self.opts = {"grid": True, "snap": True, "mesh": False, "slices": True, "trials": True,
-                     "vectors": True, "contour": "head", "axes": True, "labels": True}
+                     "vectors": True, "contour": None, "axes": True, "labels": True, "deformed": False,
+                     "time_index": None, "yield": True}
+        self.probe = None          # last clicked point in the results view
         self.current_material_id = self.project.materials[0].id
-        self.bc_params = ("Head", "head", 10.0)
+        self.bc_params = {"name": "Head", "type": "head", "value": 10.0, "value2": 0.0, "fn": [], "analyses": []}
+        self.reinf_template = None
         self.point_load = (100.0, 0.0)
         self.surcharge_q = 10.0
         self.worker = None
@@ -141,8 +148,9 @@ class MainWindow(QMainWindow):
     def _build_actions(self):
         S = QStyle.StandardPixmap
         A = self.act
-        self.a_new = A("&New Slope Project", lambda: self.new_file("slope"), "Ctrl+N", S.SP_FileIcon)
-        self.a_new_seep = A("New &Seepage Project", lambda: self.new_file("seepage"))
+        self.a_new = A("&New Project...", self.new_project_dialog, "Ctrl+N", S.SP_FileIcon)
+        self.a_new_kind = {k: A(f"New {v.split(' (')[0]} Project", lambda _=False, kk=k: self.new_file(kk))
+                           for k, v in ANALYSIS_KINDS.items()}
         self.a_open = A("&Open...", self.open_file, "Ctrl+O", S.SP_DialogOpenButton)
         self.a_save = A("&Save", self.save, "Ctrl+S", S.SP_DialogSaveButton)
         self.a_save_as = A("Save &As...", self.save_as, "Ctrl+Shift+S")
@@ -171,37 +179,37 @@ class MainWindow(QMainWindow):
         self.opt_actions = {}
         for key, label in (("grid", "Show &Grid"), ("snap", "S&nap to Grid"), ("mesh", "Show &Mesh"),
                            ("slices", "Show S&lices"), ("trials", "Show &Trial Slip Surfaces"),
-                           ("vectors", "Show Flow &Vectors"), ("axes", "Show &Axes")):
+                           ("vectors", "Show Flow &Vectors"), ("axes", "Show &Axes"),
+                           ("deformed", "Show &Deformed Mesh"), ("yield", "Show &Yielded Zones")):
             a = A(label, checkable=True)
             a.setChecked(self.opts[key])
             a.toggled.connect(lambda on, k=key: self.set_opt(k, on))
             self.opt_actions[key] = a
-        self.a_contour_h = A("Contour Total &Head", lambda: self.set_opt("contour", "head"), checkable=True)
-        self.a_contour_p = A("Contour Pressure H&ead", lambda: self.set_opt("contour", "pressure"), checkable=True)
-        gc = QActionGroup(self)
-        gc.addAction(self.a_contour_h)
-        gc.addAction(self.a_contour_p)
-        self.a_contour_h.setChecked(True)
         self.a_report = A("&Report...", self.show_report, "Ctrl+R")
         self.a_slices = A("&Slice Information...", self.show_slices)
         self.a_graph = A("&Graph...", self.show_graph)
         self.a_proj = A("&Project Properties...", self.edit_project)
         self.a_mats = A("&Materials...", self.edit_materials, "Ctrl+M")
         self.a_analysis = A("&Analysis Settings...", self.edit_analysis, "Ctrl+Shift+A")
-        self.a_add_slope = A("Add Slope Stability Analysis", lambda: self.add_analysis("slope"))
-        self.a_add_seep = A("Add Seepage Analysis", lambda: self.add_analysis("seepage"))
-        self.a_add_child = A("Add Slope Analysis Using This Seepage", lambda: self.add_analysis("slope", child=True))
+        self.a_add = {k: A(v, lambda _=False, kk=k: self.add_analysis(kk)) for k, v in ANALYSIS_KINDS.items()}
+        self.a_add_child = {k: A(v, lambda _=False, kk=k: self.add_analysis(kk, child=True))
+                            for k, v in ANALYSIS_KINDS.items()}
+        self.a_add_slope, self.a_add_seep = self.a_add["slope"], self.a_add["seepage"]
         self.a_del_analysis = A("Delete Analysis", self.delete_analysis)
         self.a_bcs = A("&Boundary Conditions...", self.edit_bcs)
         self.a_piezo_pts = A("Piezometric Line &Points...", self.edit_piezo)
         self.a_loads = A("&Loads...", self.edit_loads)
+        self.a_reinf = A("&Reinforcement...", self.edit_reinforcement)
+        self.a_flux = A("&Flux Sections...", self.edit_flux_sections)
         self.draw_group = QActionGroup(self)
         self.draw_actions = {}
         for mode, label, key in (("select", "&Select", "Esc"), ("region", "&Regions", "Ctrl+Shift+R"),
                                  ("assign", "&Materials", None), ("piezo", "&Piezometric Line", None),
                                  ("bc", "&Boundary Conditions", None), ("point_load", "Point &Loads", None),
                                  ("surcharge", "S&urcharge Loads", None), ("entry_exit", "Slip Surface &Entry and Exit", None),
-                                 ("grid", "Slip Surface &Grid", None), ("text", "Sketch &Text", None), ("pan", "Pa&n", None)):
+                                 ("grid", "Slip Surface &Grid", None), ("reinforcement", "Rein&forcement", None),
+                                 ("flux_section", "Flu&x Sections", None), ("text", "Sketch &Text", None),
+                                 ("pan", "Pa&n", None)):
             a = A(label, lambda _=False, m=mode: self.set_draw_mode(m), key, checkable=True)
             self.draw_group.addAction(a)
             self.draw_actions[mode] = a
@@ -220,8 +228,11 @@ class MainWindow(QMainWindow):
     def _build_menus(self):
         mb = self.menuBar()
         m = mb.addMenu("&File")
-        for a in (self.a_new, self.a_new_seep, self.a_open):
-            m.addAction(a)
+        m.addAction(self.a_new)
+        nm = m.addMenu("New by &Analysis Type")
+        for a in self.a_new_kind.values():
+            nm.addAction(a)
+        m.addAction(self.a_open)
         ex = m.addMenu("Open &Example")
         for name in EXAMPLES:
             ex.addAction(name, lambda n=name: self.open_example(n))
@@ -251,22 +262,26 @@ class MainWindow(QMainWindow):
         for a in self.opt_actions.values():
             m.addAction(a)
         m.addSeparator()
-        m.addAction(self.a_contour_h)
-        m.addAction(self.a_contour_p)
-        m.addSeparator()
         m.addAction(self.a_report)
         m.addAction(self.a_slices)
         m.addAction(self.a_graph)
 
         m = mb.addMenu("&Define")
-        for a in (self.a_proj, self.a_mats, self.a_analysis, None, self.a_add_slope, self.a_add_seep,
-                  self.a_add_child, self.a_del_analysis, None, self.a_bcs, self.a_piezo_pts, self.a_loads):
+        for a in (self.a_proj, self.a_mats, self.a_analysis, None):
+            m.addSeparator() if a is None else m.addAction(a)
+        add = m.addMenu("Add &Analysis")
+        for a in self.a_add.values():
+            add.addAction(a)
+        child = m.addMenu("Add &Child Analysis (uses the selected analysis)")
+        for a in self.a_add_child.values():
+            child.addAction(a)
+        for a in (self.a_del_analysis, None, self.a_bcs, self.a_piezo_pts, self.a_loads, self.a_reinf, self.a_flux):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("D&raw")
         for mode, a in self.draw_actions.items():
             m.addAction(a)
-            if mode in ("select", "assign", "surcharge", "grid"):
+            if mode in ("select", "assign", "surcharge", "grid", "flux_section"):
                 m.addSeparator()
 
         m = mb.addMenu("&Analysis")
@@ -301,7 +316,8 @@ class MainWindow(QMainWindow):
         tb("Solve", [self.a_verify, self.a_solve, self.a_solve_all, self.a_stop])
         self.addToolBarBreak()
         t = tb("Draw", [self.draw_actions[k] for k in ("select", "region", "assign", "piezo", "bc", "point_load",
-                                                        "surcharge", "entry_exit", "grid", "text", "pan")])
+                                                        "surcharge", "entry_exit", "grid", "reinforcement",
+                                                        "flux_section", "text", "pan")])
         t.addSeparator()
         t.addWidget(QLabel(" Material: "))
         self.mat_combo = QComboBox()
@@ -309,6 +325,18 @@ class MainWindow(QMainWindow):
         self.mat_combo.activated.connect(lambda i: setattr(self, "current_material_id", self.mat_combo.itemData(i)))
         t.addWidget(self.mat_combo)
         tb("AI", [self.a_ai])
+        r = tb("Results", [])
+        r.addWidget(QLabel(" Contour: "))
+        self.field_combo = QComboBox()
+        self.field_combo.setMinimumWidth(190)
+        self.field_combo.activated.connect(lambda i: self.set_opt("contour", self.field_combo.itemData(i)))
+        r.addWidget(self.field_combo)
+        r.addWidget(QLabel("  Time: "))
+        self.time_combo = QComboBox()
+        self.time_combo.setMinimumWidth(130)
+        self.time_combo.activated.connect(lambda i: self.set_opt("time_index", self.time_combo.itemData(i)))
+        r.addWidget(self.time_combo)
+        r.addAction(self.opt_actions["deformed"])
 
     def _build_status(self):
         self.mode_label = QLabel("")
@@ -390,11 +418,24 @@ class MainWindow(QMainWindow):
         self.after_change("Delete region")
 
     def add_bc(self, pts):
-        name, typ, val = self.bc_params
+        bp = dict(self.bc_params)
+        name = bp.pop("name")
         self.before_change()
         n = sum(1 for b in self.project.boundary_conditions if b.name.startswith(name))
-        self.project.add_bc(name if n == 0 else f"{name} {n + 1}", typ, val, pts)
+        self.project.add_bc(name if n == 0 else f"{name} {n + 1}", bp.pop("type"), bp.pop("value"), pts, **bp)
         self.after_change("Add boundary condition")
+
+    def add_reinforcement(self, x1, y1, x2, y2):
+        t = self.reinf_template
+        kw = {} if t is None else {k: getattr(t, k) for k in ("capacity", "bond", "bond_length", "spacing", "f_dependent")}
+        self.before_change()
+        self.project.add_reinforcement(t.type if t else "nail", x1, y1, x2, y2, **kw)
+        self.after_change("Add reinforcement")
+
+    def add_flux_section(self, pts):
+        self.before_change()
+        self.project.add_flux_section(f"FS{len(self.project.flux_sections) + 1}", pts)
+        self.after_change("Add flux section")
 
     def add_text(self, x, y):
         text, ok = QInputDialog.getText(self, "Sketch Text", "Text:")
@@ -407,21 +448,32 @@ class MainWindow(QMainWindow):
     def show_result_info(self, x, y):
         a = self.current_analysis()
         r = a.results if a else None
-        if not r:
-            return
-        if r["type"] == "seepage":
-            import numpy as np
-            from scipy.interpolate import LinearNDInterpolator
-            nodes = np.asarray(r["nodes"])
-            h = float(LinearNDInterpolator(nodes, r["head"])(x, y))
-            if np.isnan(h):
-                return
-            u = self.project.unit
-            self.props.setHtml(f"<b>Result at ({x:.3f}, {y:.3f})</b><br>Total head: {h:.4f} {u('length')}<br>"
-                               f"Pressure head: {h - y:.4f} {u('length')}<br>"
-                               f"Pore-water pressure: {(h - y) * self.project.gamma_w:.3f} {u('pressure')}")
-        else:
+        if not r or r.get("type") == "slope":
             self.refresh_props()
+            return
+        import numpy as np
+        from scipy.interpolate import LinearNDInterpolator
+        nodes = np.asarray(r["nodes"])
+        rows = []
+        o = dict(self.opts)
+        for key, label in available_fields(r):
+            o["contour"] = key
+            vals, per_elem, lab, unit = Renderer(self.project, a, View(), None, mode="results", opts=o).field_values(r)
+            if per_elem:
+                tris = np.asarray(r["tris"])
+                cent = nodes[tris].mean(axis=1)
+                val = float(vals[np.argmin(np.hypot(cent[:, 0] - x, cent[:, 1] - y))])
+            else:
+                val = float(LinearNDInterpolator(nodes, vals)(x, y))
+            if np.isfinite(val):
+                rows.append(f"<tr><td>{lab}</td><td align=right>{val:.5g}</td><td>{unit}</td></tr>")
+        if not rows:
+            return
+        self.probe = (x, y)
+        tsel = self.opts.get("time_index")
+        when = f" at t = {result_times(r)[tsel]:g} s" if tsel is not None and result_times(r) else ""
+        self.props.setHtml(f"<b>Result at ({x:.3f}, {y:.3f}){when}</b><table cellpadding=2>{''.join(rows)}</table>"
+                           "<i>View > Graph plots this point against time.</i>")
 
     # ------------------------------------------------------------------
     # refresh
@@ -436,6 +488,7 @@ class MainWindow(QMainWindow):
             self.current_material_id = self.project.materials[0].id
         self.mat_combo.setCurrentIndex(max(0, self.mat_combo.findData(self.current_material_id)))
         self.units_label.setText(f"Units: {self.project.units}")
+        self.refresh_result_controls()
         self.a_undo.setEnabled(bool(self.undo_stack))
         self.a_redo.setEnabled(bool(self.redo_stack))
         name = self.path.name if self.path else "Untitled"
@@ -450,13 +503,17 @@ class MainWindow(QMainWindow):
         def label(a):
             r = a.results
             if a.kind == "slope":
-                s = f"{a.name}  [{SLOPE_METHODS[a.method]}]"
+                s = f"{a.name}  [{SLOPE_METHODS.get(a.method, a.method)}]"
                 if r and r.get("critical"):
                     s += f"  F = {r['critical']['fos']:.3f}"
             else:
-                s = f"{a.name}  [Seepage]"
+                extra = " transient" if getattr(a, "transient", False) and a.kind in ("seepage", "thermal", "air") else ""
+                s = f"{a.name}  [{KIND_SHORT.get(a.kind, a.kind)}{extra}]"
                 if r:
-                    s += "  solved" if r["converged"] else "  not converged"
+                    if r.get("srm_fos"):
+                        s += f"  SRF = {r['srm_fos']:.3f}"
+                    else:
+                        s += "  solved" if r.get("converged", True) else "  not converged"
             return s
 
         def add(a, parent):
@@ -483,7 +540,7 @@ class MainWindow(QMainWindow):
         p = self.project
         html = [f"<b>{a.name}</b><br>"]
         if a.kind == "slope":
-            html.append(f"Method: {SLOPE_METHODS[a.method]}<br>Search: {a.search.mode.replace('_', ' ')}<br>")
+            html.append(f"Method: {SLOPE_METHODS.get(a.method, a.method)}<br>Search: {a.search.mode.replace('_', ' ')}<br>")
         r = a.results
         if not r:
             html.append("<i>Not solved. Press F5 to solve.</i>")
@@ -494,19 +551,85 @@ class MainWindow(QMainWindow):
                 html.append(f"Valid trial surfaces: {r['n_valid']} of {r['n_total']}<br><table>")
                 for m, v in c["all_methods"].items():
                     val = "-" if v["fos"] is None else f"{v['fos']:.3f}"
-                    html.append(f"<tr><td>{SLOPE_METHODS[m]}</td><td align=right>{val}</td></tr>")
+                    html.append(f"<tr><td>{SLOPE_METHODS.get(m, m)}</td><td align=right>{val}</td></tr>")
                 html.append("</table>")
                 pr = r.get("probability")
                 if pr and pr.get("n"):
                     html.append(f"<br>Mean F {pr['mean']:.3f}, P(failure) {100 * pr['pf']:.2f} %")
+                nm = r.get("newmark")
+                if nm and "displacement" in nm:
+                    html.append(f"<br>Newmark: ky = {nm['ky']:.3f} g, permanent displacement "
+                                f"{nm['displacement']:.4f} {p.unit('length')} (View > Graph)")
             else:
                 html.append(f"<span style='color:#a00'>{r.get('message', 'No valid slip surface')}</span>")
         else:
-            html.append(f"Converged: {'yes' if r['converged'] else '<b>no</b>'} ({r['iterations']} iterations)<br>"
-                        f"Inflow: {r['inflow']:.4e} {p.unit('flux')}<br>Outflow: {r['outflow']:.4e} {p.unit('flux')}<br>"
-                        f"Nodes: {len(r['nodes'])}, elements: {len(r['tris'])}<br>"
-                        "<i>Click the drawing to read values.</i>")
+            html.append(self.result_summary(a, r))
         self.props.setHtml("".join(html))
+
+    def result_summary(self, a, r):
+        p = self.project
+        u = p.unit
+        h = [f"Converged: {'yes' if r.get('converged', True) else '<b>no</b>'}<br>"]
+        t = r["type"]
+        if t in ("seepage", "air"):
+            h.append(f"Inflow: {r['inflow']:.4e} {u('flux')}<br>Outflow: {r['outflow']:.4e} {u('flux')}<br>")
+            for name, q in (r.get("flux_sections") or {}).items():
+                h.append(f"Flux section {name}: {q:.4e} {u('flux')}<br>")
+            if "balance_error" in r:
+                h.append(f"Water balance error: {100 * r['balance_error']:.3f} %<br>")
+        elif t == "stress":
+            if r.get("srm_fos"):
+                h.append(f"<span style='font-size:14pt'><b>Strength reduction F = {r['srm_fos']:.3f}</b></span><br>")
+            h.append(f"Max displacement: {max(abs(v) for v in r['dx'] + r['dy']):.4g} {u('length')}<br>")
+            h.append(f"Yielded elements: {sum(r.get('yielded', []))} of {len(r['tris'])}<br>")
+            for name, (rx, ry) in (r.get("reactions") or {}).items():
+                h.append(f"Reaction {name}: x {rx:.4g}, y {ry:.4g} {u('force')}<br>")
+            if r.get("settlement_history"):
+                h.append(f"Final settlement (monitor point): {r['settlement_history'][-1]:.4g} {u('length')}<br>")
+        elif t == "dynamic":
+            f1 = r.get("natural_frequency")
+            h.append(f"Peak acceleration: {max(r['max_acceleration']):.3f} g<br>")
+            if f1:
+                h.append(f"First natural frequency: {f1:.3f} Hz<br>")
+        elif t == "thermal":
+            h.append(f"Temperature range: {min(r['temperature']):.2f} to {max(r['temperature']):.2f} {u('temperature')}<br>")
+            if "balance_error" in r:
+                h.append(f"Energy balance error: {100 * r['balance_error']:.3f} %<br>")
+        elif t == "transport":
+            h.append(f"Max concentration: {max(r['concentration']):.4g} {u('concentration')}<br>"
+                     f"Max grid Peclet number: {r['max_grid_peclet']:.2f}<br>")
+            for prt in r.get("particles", []):
+                h.append(f"Particle from {prt['start']}: travel {prt['time']:.4g} s<br>")
+        if result_times(r):
+            h.append(f"Saved times: {len(result_times(r))} (choose one in the Results toolbar)<br>")
+        h.append(f"Nodes: {len(r['nodes'])}, elements: {len(r['tris'])}<br><i>Click the drawing to read values.</i>")
+        return "".join(h)
+
+    def refresh_result_controls(self):
+        """Fill the Results toolbar for the current analysis."""
+        a = self.current_analysis()
+        r = a.results if a else None
+        self.field_combo.blockSignals(True)
+        self.time_combo.blockSignals(True)
+        self.field_combo.clear()
+        self.time_combo.clear()
+        fields = available_fields(r)
+        for key, label in fields:
+            self.field_combo.addItem(label, key)
+        if fields and self.opts.get("contour") not in [k for k, _ in fields]:
+            self.opts["contour"] = fields[0][0]
+        self.field_combo.setCurrentIndex(max(0, self.field_combo.findData(self.opts.get("contour"))))
+        times = result_times(r)
+        self.time_combo.addItem("Final", None)
+        for i, tv in enumerate(times):
+            self.time_combo.addItem(f"{tv:g} s", i)
+        if self.opts.get("time_index") is not None and self.opts["time_index"] >= len(times):
+            self.opts["time_index"] = None
+        self.time_combo.setCurrentIndex(max(0, self.time_combo.findData(self.opts.get("time_index"))))
+        self.field_combo.setEnabled(bool(fields))
+        self.time_combo.setEnabled(bool(times))
+        self.field_combo.blockSignals(False)
+        self.time_combo.blockSignals(False)
 
     def tree_selected(self):
         it = self.tree.currentItem()
@@ -514,7 +637,9 @@ class MainWindow(QMainWindow):
             self.current_aid = it.data(0, Qt.UserRole)
             if self.view_mode == "results" and not self.current_analysis().results:
                 self.set_view("define")
+            self.opts["time_index"] = None
             self.refresh_props()
+            self.refresh_result_controls()
             self.canvas.update()
 
     def tree_menu(self, pos):
@@ -525,12 +650,14 @@ class MainWindow(QMainWindow):
             m.addAction(self.a_analysis)
             m.addAction(self.a_solve)
             m.addAction("Rename...", self.rename_analysis)
-            if self.current_analysis().kind == "seepage":
-                m.addAction(self.a_add_child)
+            child = m.addMenu("Add Child Analysis")
+            for a in self.a_add_child.values():
+                child.addAction(a)
             m.addAction(self.a_del_analysis)
             m.addSeparator()
-        m.addAction(self.a_add_slope)
-        m.addAction(self.a_add_seep)
+        add = m.addMenu("Add Analysis")
+        for a in self.a_add.values():
+            add.addAction(a)
         m.exec(self.tree.viewport().mapToGlobal(pos))
 
     def log_msg(self, text):
@@ -565,12 +692,25 @@ class MainWindow(QMainWindow):
             self.draw_actions["select"].setChecked(True)
             mode = "select"
         if mode == "bc":
-            d = BCDialog(*self.bc_params, parent=self)
+            a = self.current_analysis()
+            group = KIND_BCS.get(a.kind) if a else None
+            bp = dict(self.bc_params)
+            if group and bp["type"] not in BC_KINDS[group]:
+                bp["type"] = next(iter(BC_KINDS[group]))
+            d = BCDialog(bp["name"], bp["type"], bp["value"], parent=self, kinds=[group] if group else None,
+                         value2=bp["value2"], fn=bp["fn"], analyses=bp["analyses"], project=self.project)
             if not d.exec():
                 self.draw_actions["select"].setChecked(True)
                 mode = "select"
             else:
-                self.bc_params = (d.name.text().strip() or "BC", d.type.currentData(), d.value.value())
+                self.bc_params = d.params()
+        if mode == "reinforcement":
+            d = ReinforcementDialog(self.reinf_template, self, self.project.unit)
+            if not d.exec():
+                self.draw_actions["select"].setChecked(True)
+                mode = "select"
+            else:
+                self.reinf_template = d.r
         if mode == "point_load":
             fy, ok = QInputDialog.getDouble(self, "Point Load", f"Vertical load ({self.project.unit('force')}, down +):",
                                             self.point_load[0], -1e9, 1e9, 3)
@@ -610,6 +750,12 @@ class MainWindow(QMainWindow):
         self.a_define.setChecked(True)
         self.canvas.zoom_fit()
         self.refresh_all()
+
+    def new_project_dialog(self):
+        labels = list(ANALYSIS_KINDS.values())
+        item, ok = QInputDialog.getItem(self, "New Project", "First analysis type:", labels, 0, False)
+        if ok:
+            self.new_file(list(ANALYSIS_KINDS)[labels.index(item)])
 
     def new_file(self, kind="slope", units=None):
         if not self.maybe_save():
@@ -854,23 +1000,34 @@ class MainWindow(QMainWindow):
 
     def add_analysis(self, kind, child=False):
         parent = self.current_analysis() if child else None
-        if child and (parent is None or parent.kind != "seepage"):
-            QMessageBox.information(self, APP_NAME, "Select a seepage analysis first.")
+        if child and parent is None:
+            QMessageBox.information(self, APP_NAME, "Select the parent analysis first.")
             return
         self.before_change()
         n = len(self.project.analyses) + 1
+        a = self.project.add_analysis(f"{KIND_SHORT[kind]} {n}", kind)
+        if parent:
+            a.parent_id = parent.id
+            a.name = f"{KIND_SHORT[kind]} ({parent.name})"
+            if parent.kind in ("seepage", "stress", "thermal", "air", "transport"):
+                a.mesh_size = parent.mesh_size
+            if kind == "seepage" and parent.kind == "seepage":
+                a.transient, a.initial = True, "parent"
+            if kind == "thermal" and parent.kind == "thermal":
+                a.transient, a.initial = True, "parent"
+            if kind == "stress" and parent.kind == "stress":
+                a.stress_type = "load"
+            if kind in ("slope", "stress") and parent.kind == "seepage":
+                a.pwp = "seepage"
+            if kind == "slope" and parent.kind == "stress":
+                a.method = "finite_element"
         if kind == "slope":
-            a = self.project.add_analysis(f"Slope Stability {n}", "slope")
-            if parent:
-                a.parent_id, a.pwp, a.name = parent.id, "seepage", f"Stability ({parent.name})"
             if self.project.regions:
                 from ..geometry import auto_entry_exit
                 (e1, e2), (x1, x2) = auto_entry_exit(self.project)
                 a.search.entry_x1, a.search.entry_x2, a.search.exit_x1, a.search.exit_x2 = e1, e2, x1, x2
-            if self.project.piezometric_line and not parent:
+            if self.project.piezometric_line and a.pwp == "none":
                 a.pwp = "piezometric"
-        else:
-            a = self.project.add_analysis(f"Seepage {n}", "seepage")
         self.current_aid = a.id
         self.after_change(f"Add analysis {a.name}", keep_results=True)
         self.edit_analysis()
@@ -906,33 +1063,103 @@ class MainWindow(QMainWindow):
         self.after_change("Delete analysis", keep_results=True)
 
     def edit_bcs(self):
-        lines = [f"{b.name}; {b.type}; {b.value:g}; " + " ".join(f"{x:g},{y:g}" for x, y in b.points)
-                 for b in self.project.boundary_conditions]
+        def fmt(b):
+            parts = [b.name, b.type, f"{b.value:g}", " ".join(f"{x:g},{y:g}" for x, y in b.points)]
+            if b.value2 or b.fn or b.analyses:
+                parts.append(f"{b.value2:g}")
+                parts.append(" ".join(f"{t:g}:{v:g}" for t, v in b.fn))
+                parts.append(" ".join(str(i) for i in b.analyses))
+            return "; ".join(parts)
         d = TextEditDialog("Boundary Conditions",
-                           "One per line:  name; type; value; x1,y1 x2,y2 ...\nTypes: " + ", ".join(BC_TYPES),
-                           "\n".join(lines), self)
+                           "One per line:  name; type; value; x1,y1 x2,y2 ...[; second value; t:v t:v ...; analysis ids]\n"
+                           "Types: " + ", ".join(BC_TYPES),
+                           "\n".join(fmt(b) for b in self.project.boundary_conditions), self)
         if not d.exec():
             return
         bcs = []
+        line = ""
         try:
             for line in d.text().splitlines():
                 if not line.strip():
                     continue
-                name, typ, val, pts = [s.strip() for s in line.split(";")]
+                f = [s.strip() for s in line.split(";")]
+                if len(f) < 4:
+                    raise ValueError("Expected at least: name; type; value; points")
+                name, typ, val, pts = f[:4]
                 if typ not in BC_TYPES:
                     raise ValueError(f"Unknown type '{typ}'")
                 pp = [[float(v) for v in p.split(",")] for p in pts.split()]
                 if len(pp) < 2:
                     raise ValueError(f"'{name}' needs at least two points")
-                bcs.append((name, typ, float(val), pp))
+                kw = {}
+                if len(f) > 4 and f[4]:
+                    kw["value2"] = float(f[4])
+                if len(f) > 5 and f[5]:
+                    kw["fn"] = [[float(a) for a in tv.split(":")] for tv in f[5].split()]
+                if len(f) > 6 and f[6]:
+                    kw["analyses"] = [int(i) for i in f[6].split()]
+                bcs.append((name, typ, float(val), pp, kw))
         except ValueError as e:
             QMessageBox.warning(self, "Invalid input", f"{e}\n\nLine: {line}")
             return
         self.before_change()
         self.project.boundary_conditions = []
-        for b in bcs:
-            self.project.add_bc(*b)
+        for name, typ, val, pp, kw in bcs:
+            self.project.add_bc(name, typ, val, pp, **kw)
         self.after_change("Edit boundary conditions")
+
+    def edit_reinforcement(self):
+        lines = [f"{r.type} {r.x1:g} {r.y1:g} {r.x2:g} {r.y2:g} {r.capacity:g} {r.bond:g} {r.bond_length:g} "
+                 f"{r.spacing:g} {int(r.f_dependent)}" for r in self.project.reinforcements]
+        d = TextEditDialog("Reinforcement",
+                           "type x1 y1 x2 y2 capacity bond bond_length spacing f_dependent(0/1)\n"
+                           "(x1, y1) is the head at the slope face. Types: " + ", ".join(REINFORCEMENT_TYPES),
+                           "\n".join(lines), self)
+        if not d.exec():
+            return
+        rows = []
+        try:
+            for line in d.text().splitlines():
+                p = line.split()
+                if not p:
+                    continue
+                if p[0] not in REINFORCEMENT_TYPES or len(p) != 10:
+                    raise ValueError(line)
+                rows.append((p[0], *map(float, p[1:9]), bool(int(p[9]))))
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid input", f"Could not read: {e}")
+            return
+        self.before_change()
+        self.project.reinforcements = []
+        for t, x1, y1, x2, y2, cap, bond, bl, sp, fd in rows:
+            self.project.add_reinforcement(t, x1, y1, x2, y2, capacity=cap, bond=bond, bond_length=bl,
+                                           spacing=sp, f_dependent=fd)
+        self.after_change("Edit reinforcement")
+
+    def edit_flux_sections(self):
+        lines = [f"{f.name}; " + " ".join(f"{x:g},{y:g}" for x, y in f.points) for f in self.project.flux_sections]
+        d = TextEditDialog("Flux Sections", "One per line:  name; x1,y1 x2,y2 ...  (flow to the right of the "
+                           "drawing direction is positive)", "\n".join(lines), self)
+        if not d.exec():
+            return
+        out = []
+        try:
+            for line in d.text().splitlines():
+                if not line.strip():
+                    continue
+                name, pts = [s.strip() for s in line.split(";")]
+                pp = [[float(v) for v in p.split(",")] for p in pts.split()]
+                if len(pp) < 2:
+                    raise ValueError(line)
+                out.append((name, pp))
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid input", f"Could not read: {e}")
+            return
+        self.before_change()
+        self.project.flux_sections = []
+        for name, pp in out:
+            self.project.add_flux_section(name, pp)
+        self.after_change("Edit flux sections")
 
     def edit_piezo(self):
         d = PointsDialog("Piezometric Line", self.project.piezometric_line, self)
@@ -1079,10 +1306,41 @@ class MainWindow(QMainWindow):
         if not r:
             QMessageBox.information(self, APP_NAME, "Solve the analysis first.")
             return
-        if r["type"] == "seepage":
-            GraphDialog("Convergence", list(range(1, len(r["history"]) + 1)), r["history"], "Iteration",
-                        "Max head change", parent=self).exec()
+        t = r["type"]
+        u = self.project.unit
+        if t != "slope" and self.probe is not None and result_times(r):
+            self.graph_probe(a, r)
             return
+        if t == "stress" and r.get("settlement_history"):
+            GraphDialog("Consolidation settlement", r["times"], r["settlement_history"], "Time (s)",
+                        f"Settlement ({u('length')})", parent=self).exec()
+            return
+        if t == "stress" and r.get("srm_trials"):
+            tr = sorted(r["srm_trials"])
+            GraphDialog("Strength reduction trials", [x[0] for x in tr], [1.0 if x[1] else 0.0 for x in tr],
+                        "Strength reduction factor", "Converged (1) / failed (0)", bars=True, parent=self).exec()
+            return
+        if t == "stress" and r.get("history"):
+            h = r["history"]
+            GraphDialog("Load steps", [x["step"] for x in h], [x["max_disp"] for x in h], "Load step",
+                        f"Max displacement ({u('length')})", parent=self).exec()
+            return
+        if t == "dynamic":
+            GraphDialog("Input acceleration", r["input_times"], r["input_acc"], "Time (s)", "Acceleration (g)",
+                        parent=self).exec()
+            return
+        if t != "slope":
+            if r.get("history"):
+                GraphDialog("Convergence", list(range(1, len(r["history"]) + 1)), r["history"], "Iteration",
+                            "Max change", parent=self).exec()
+            else:
+                QMessageBox.information(self, APP_NAME, "Click a point in the results view of a transient "
+                                        "analysis to graph it against time.")
+            return
+        if r.get("newmark") and r["newmark"].get("displacement_history"):
+            nm = r["newmark"]
+            GraphDialog(f"Newmark displacement (ky = {nm['ky']:.3f} g)", nm["times"], nm["displacement_history"],
+                        "Time (s)", f"Permanent displacement ({u('length')})", parent=self).exec()
         if r.get("sensitivity") and "values" in r["sensitivity"]:
             s = r["sensitivity"]
             GraphDialog("Sensitivity", s["values"], s["fos"], s["param"], "Factor of safety", parent=self).exec()
@@ -1096,6 +1354,21 @@ class MainWindow(QMainWindow):
             fs = [t["fos"] for t in r.get("trials", [])]
             GraphDialog("Trial Slip Surfaces", list(range(1, len(fs) + 1)), fs, "Trial (sorted)",
                         "Factor of safety", parent=self).exec()
+
+    def graph_probe(self, a, r):
+        import numpy as np
+        from scipy.interpolate import LinearNDInterpolator
+        x, y = self.probe
+        times = result_times(r)
+        o = dict(self.opts)
+        vals = []
+        label = unit = ""
+        for i in range(len(times)):
+            o["time_index"] = i
+            v, _, label, unit = Renderer(self.project, a, View(), None, mode="results", opts=o).field_values(r)
+            vals.append(float(LinearNDInterpolator(np.asarray(r["nodes"]), v)(x, y)))
+        GraphDialog(f"{label} at ({x:.2f}, {y:.2f})", times, vals, "Time (s)",
+                    f"{label} ({unit})" if unit else label, parent=self).exec()
 
     # ------------------------------------------------------------------
     # AI, window, help
@@ -1121,10 +1394,8 @@ class MainWindow(QMainWindow):
         if not d.exec() or not d.choice:
             return
         action, arg, units = d.choice
-        if action == "new_slope":
-            self.new_file("slope", units)
-        elif action == "new_seep":
-            self.new_file("seepage", units)
+        if action == "new":
+            self.new_file(arg, units)
         elif action == "open":
             self.open_file()
         elif action == "ai":
@@ -1139,8 +1410,9 @@ class MainWindow(QMainWindow):
 
     def about(self):
         QMessageBox.about(self, f"About {APP_NAME}",
-                          f"<b>{APP_NAME} {__version__}</b><br>2D slope stability (limit equilibrium) and "
-                          "steady-state seepage (finite element) analysis.<br><br>"
+                          f"<b>{APP_NAME} {__version__}</b><br>2D geotechnical analysis: slope stability, "
+                          "seepage, stress-deformation and consolidation, earthquake response, heat transfer "
+                          "with freezing, contaminant transport and air flow.<br><br>"
                           f"Python {sys.version.split()[0]}, Qt for Python.<br>MIT License.")
 
     def closeEvent(self, e):
@@ -1176,30 +1448,44 @@ class TextEditDialog(QDialog):
 GUIDE = """StrataLab quick guide
 
 1. Define the problem
-   - Define > Project Properties: title, units, grid spacing.
-   - Define > Materials: strength (c, phi, unit weight) and hydraulic (k sat) properties.
+   - File > New Project: pick the first analysis type (slope, seepage, stress, dynamic, thermal,
+     contaminant transport or air flow). More analyses can be added later (Define > Add Analysis).
+   - Define > Materials: one material list with tabs for strength, probabilistic, hydraulic, stress,
+     dynamic, thermal, transport and air properties. Only the tabs an analysis uses matter.
    - Draw > Regions: click the corners of each soil region (snaps to grid and existing points).
      Click the first point, press Enter or right-click to close. Edit > Edit Region Points for typed input.
    - Draw > Materials: pick a material in the toolbar and click regions to assign it.
-   - Draw > Piezometric Line, Point Loads, Surcharge Loads as needed.
+   - Draw > Piezometric Line, Point Loads, Surcharge Loads, Reinforcement, Flux Sections as needed.
 
-2. Slope stability
-   - Define > Analysis Settings: method, pore-water pressure, seismic coefficient, slip surface search,
-     probabilistic and sensitivity options.
-   - Draw > Slip Surface Entry and Exit (or Grid), or use 'Auto' in the analysis settings.
+2. Analyses and their parents
+   - Each analysis can have a parent (Analysis Settings > Parent). Children use their parents' results:
+     seepage -> pore pressures for slope and stress, flow for transport, saturation for air flow;
+     stress -> stresses for the finite element slope method and initial stresses for later stages;
+     dynamic -> Newmark displacement of a slope; earlier seepage / thermal -> initial conditions.
+   - Define > Add Child Analysis creates a child of the selected analysis with sensible settings.
 
-3. Seepage
-   - Add a seepage analysis (Define > Add Seepage Analysis).
-   - Draw > Boundary Conditions along region edges: total head, pressure head, flux or seepage face.
-   - To use seepage pore pressures in a stability analysis, select the seepage analysis and choose
-     Define > Add Slope Analysis Using This Seepage.
+3. Boundary conditions
+   - Draw > Boundary Conditions offers the types that fit the selected analysis (hydraulic, stress,
+     thermal, transport or air). A boundary can vary with time (value vs time table) and can be limited
+     to one analysis ("Applies to"), e.g. a footing displacement used only in the load stage.
+   - Head boundaries above the water level automatically act as potential seepage faces.
 
-4. Solve and review
+4. Slope stability
+   - Methods: Ordinary, Bishop, Janbu (simplified, corrected, generalized), Spencer, Morgenstern-Price,
+     Corps of Engineers 1 and 2, Lowe-Karafiath, Sarma, and the finite element stress method.
+   - Searches: entry and exit, grid and radius, grid and tangent lines, block, auto locate, fully
+     specified; optional optimization of the critical surface.
+   - Loads and Cracks tab: seismic kh / kv, tension crack depth or angle and its water, optimization.
+
+5. Solve and review
    - Analysis > Verify (F6), Solve (F5), Solve All (Shift+F5).
-   - Results view (Ctrl+2): critical slip surface and factor of safety, or head contours and the phreatic line.
-   - View > Report, Slice Information, Graph. File > Export > PDF, PNG, CSV.
+   - Results view (Ctrl+2): pick the contour field and the time step in the Results toolbar;
+     View > Show Deformed Mesh for stress results. Click the drawing to read every value at a point.
+   - View > Graph: load steps, consolidation settlement, input motion, Newmark displacement, or, after
+     clicking a point in a transient result, that point against time.
+   - View > Report, Slice Information. File > Export > PDF, PNG, CSV.
 
-5. AI Slope Builder
+6. AI Slope Builder
    - AI > AI Slope Builder: describe the slope in words; Claude builds the model. Review every value
      before relying on the result.
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.0.0 - 2026-11-02
+
+- New analysis types: stress-deformation (in situ, load-deformation, Mohr-Coulomb plasticity,
+  strength reduction, coupled consolidation), dynamic earthquake (Newmark integration, equivalent
+  linear), thermal with freezing and thawing, contaminant transport with particle tracking, air flow.
+- Seepage: transient flow, van Genuchten functions, infiltration, free drainage, nodal flux,
+  time-varying boundaries, flux sections, automatic time-step cutting.
+- Slope stability: Janbu corrected and generalized, Corps of Engineers 1 and 2, Lowe-Karafiath, Sarma,
+  finite element stress method; SHANSEP, bilinear, shear/normal, Hoek-Brown, anisotropic, undrained
+  with depth and unsaturated strength; reinforcement; tension cracks; ponded water; kv; tangent-line,
+  block and auto searches; optimization; lognormal and uniform distributions; Newmark displacement.
+- Slice boundaries now fall on every slip-surface vertex and ground corner.
+- Boundary conditions can be limited to one analysis and can vary with time.
+- Interface: new-project type picker, materials dialog with tabs per physics, settings per analysis
+  type, results toolbar (field, time, deformed mesh), point read-out, graphs against time,
+  reinforcement and flux section tools, eight new examples.
+
 ## 1.0.0 - 2026-11-02
 
 First release.
