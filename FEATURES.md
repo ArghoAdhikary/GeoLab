@@ -75,6 +75,7 @@ directly with another vendor's software.
 | Materials dialog with tabs per physics; analysis settings per analysis type; boundary conditions limited to one analysis | `test_ui.py` |
 | Results: any field, any saved time, deformed mesh, yield zones, vectors, particle paths, point read-out, graphs vs time | `test_results_view_for_every_analysis_type` |
 | Files: `.slab`, JSON, CSV (every nodal field), PNG, PDF, printing; command-line batch solver | `test_io.py` |
+| GeoStudio `.gsz` open and export: geometry (points, lines, regions); material names, region assignments and common properties are read when present | real GeoStudio 2025.2 file imported; exported files opened and rewritten by GeoStudio's GeoCmd with all points, lines and regions kept; `test_gsz.py` |
 | AI Slope Builder (Claude) | fake client only |
 | Windows and macOS builds | GitHub Actions |
 
@@ -90,6 +91,6 @@ directly with another vendor's software.
 | Consolidation with plasticity; Cam Clay / hyperbolic in the in situ stage | Consolidation is linear elastic; nonlinear models apply in load-deformation stages (in situ uses E and nu). |
 | Rapid drawdown by the Duncan-Wright-Wong method | Use transient seepage then slope stability. |
 | Unit conversion when switching unit systems | Switching relabels values. |
-| `.gsz` import/export | Not supported: another vendor's proprietary format. |
+| `.gsz`: materials, analyses, boundary conditions | Only geometry is exchanged so far; the rest needs a GeoStudio sample file that contains them. |
 | Code signing / notarization | Builds are unsigned. |
 | Live Claude API call | Tested with a fake client only. The AI builder sets up slope models. |

@@ -29,7 +29,8 @@ from .render import Renderer, View, available_fields, project_bounds, result_tim
 KIND_SHORT = {"slope": "Slope", "seepage": "Seepage", "stress": "Stress", "dynamic": "Dynamic",
               "thermal": "Thermal", "transport": "Transport", "air": "Air flow"}
 
-FILTER = f"{APP_NAME} project (*{FILE_EXT});;JSON project (*.json)"
+FILTER = (f"All supported (*{FILE_EXT} *.gsz *.json);;{APP_NAME} project (*{FILE_EXT});;"
+          "GeoStudio project (*.gsz);;JSON project (*.json)")
 MAX_UNDO = 60
 
 
@@ -159,6 +160,7 @@ class MainWindow(QMainWindow):
         self.a_png = A("Export &Image (PNG)...", self.export_png)
         self.a_csv = A("Export Results (&CSV)...", self.export_csv)
         self.a_json = A("Export Project (&JSON)...", self.export_json)
+        self.a_gsz = A("Export &GeoStudio Project (.gsz)...", self.export_gsz)
         self.a_import = A("&Import Region Points (CSV)...", self.import_points)
         self.a_print = A("&Print...", self.print_doc, "Ctrl+P")
         self.a_clear = A("&Delete All Results", self.delete_results)
@@ -245,7 +247,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(self.a_import)
         exp = m.addMenu("E&xport")
-        for a in (self.a_pdf, self.a_png, self.a_csv, self.a_json):
+        for a in (self.a_pdf, self.a_png, self.a_csv, self.a_json, self.a_gsz):
             exp.addAction(a)
         m.addAction(self.a_print)
         m.addSeparator()
@@ -894,6 +896,21 @@ class MainWindow(QMainWindow):
                 self.log_msg(f"Exported results: {path}")
             except Exception as e:
                 QMessageBox.critical(self, "Export failed", str(e))
+
+    def export_gsz(self):
+        path = self._ask_save("Export GeoStudio Project", ".gsz", "GeoStudio project (*.gsz)")
+        if not path:
+            return
+        try:
+            from ..gsz import write_gsz
+            write_gsz(self.project, path)
+        except Exception as e:
+            QMessageBox.critical(self, "Export failed", str(e))
+            return
+        self.log_msg(f"Exported GeoStudio file: {path} (geometry: points, lines and regions)")
+        QMessageBox.information(self, APP_NAME, "Exported the geometry (points, lines and regions). Materials, "
+                                "analyses and boundary conditions are not written to .gsz files yet; "
+                                "define them in GeoStudio.")
 
     def export_json(self):
         path = self._ask_save("Export Project JSON", ".json", "JSON (*.json)")

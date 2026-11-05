@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.0 - 2026-11-05
+
+- Open GeoStudio `.gsz` files (File > Open) and export them (File > Export > GeoStudio Project). The
+  geometry (points, lines, regions) is exchanged; material names, region assignments and common
+  properties are read when the file has them. Exported files are accepted by GeoStudio's GeoCmd.
+
 ## 2.1.0 - 2026-11-05
 
 - Climate boundary for seepage: rainfall and potential evaporation that vary with time; actual

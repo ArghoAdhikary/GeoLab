@@ -30,6 +30,9 @@ def load_project(path) -> Project:
         raise FileNotFoundError(f"File not found: {path}")
     if path.suffix.lower() == ".json":
         return Project.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    if path.suffix.lower() == ".gsz":
+        from .gsz import read_gsz
+        return read_gsz(path)
     try:
         with zipfile.ZipFile(path) as z:
             manifest = json.loads(z.read("manifest.json"))
