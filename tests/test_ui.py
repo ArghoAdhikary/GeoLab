@@ -21,8 +21,10 @@ def win(app, tmp_path, monkeypatch):
     from PySide6.QtCore import QSettings
     QSettings.setDefaultFormat(QSettings.IniFormat)
     QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(tmp_path))
-    from stratalab.ui.main_window import MainWindow
-    w = MainWindow()
+    from stratalab.ui import main_window
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(main_window, "QSettings", lambda *a, **k: QSettings(ini, QSettings.IniFormat))
+    w = main_window.MainWindow()
     w.resize(1200, 800)
     w.show()
     app.processEvents()

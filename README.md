@@ -59,7 +59,7 @@ The result is `dist/StrataLab/StrataLab.exe` on Windows or `dist/StrataLab.app` 
 2. **Draw > Regions**: click the corners of each soil layer (snaps to the grid and to existing points);
    click the first point or press Enter to close. **Define > Materials** sets strengths and permeability;
    **Draw > Materials** assigns them.
-3. Slope stability: **Draw > Slip Surface Entry and Exit** (or *Auto* in **Define > Analysis Settings**),
+3. Slope stability: **Draw > Slip Surface Entry and Exit** (or *Auto* in **Define > Analyses**),
    then **Analysis > Solve** (F5). The results view shows the critical slip surface and its factor of safety.
 4. Seepage: add boundary conditions along region edges (**Draw > Boundary Conditions**), solve, and read
    values by clicking the drawing. Add a child slope analysis to use the seepage pore pressures.

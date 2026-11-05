@@ -1,17 +1,17 @@
-"""Dialogs: start page, materials, analysis settings, project settings and result viewers."""
+"""Dialogs: materials, analysis settings, project settings and result viewers."""
 from __future__ import annotations
 
 import copy
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QThread, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-                               QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton,
-                               QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
+                               QListWidget, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
+                               QSpinBox, QStackedWidget, QStyle, QTableWidget, QTableWidgetItem, QTabWidget,
+                               QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, __version__
 from ..geometry import auto_entry_exit
 from ..model import (ANALYSIS_KINDS, BC_KIND_OF, BC_KINDS, BC_TYPES, HYDRAULIC_MODELS, INTERSLICE_FUNCTIONS,
                      MATERIAL_COLORS, PWP_MODES, REINFORCEMENT_TYPES, SEARCH_MODES, SLOPE_METHODS, STRENGTH_MODELS,
@@ -44,65 +44,6 @@ def combo(options: dict, current):
     i = c.findData(current)
     c.setCurrentIndex(max(i, 0))
     return c
-
-
-# ---------------------------------------------------------------------------
-# Start page
-# ---------------------------------------------------------------------------
-class StartPage(QDialog):
-    """Opening screen: create, open, examples, recent files and the AI builder."""
-
-    def __init__(self, recent: list[str], examples: list[str], parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} - Start")
-        self.setMinimumSize(760, 460)
-        self.choice = None
-        root = QHBoxLayout(self)
-
-        left = QVBoxLayout()
-        title = QLabel(f"<span style='font-size:26pt;font-weight:600;color:#1d4e89'>{APP_NAME}</span>"
-                       f"<br><span style='color:#555'>Geotechnical analysis suite &nbsp; v{__version__}</span>")
-        left.addWidget(title)
-        left.addSpacing(14)
-        self.units = QComboBox()
-        self.units.addItem("Metric (m, kN, kPa)", "metric")
-        self.units.addItem("Imperial (ft, lbf, psf)", "imperial")
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Units for new projects:"))
-        row.addWidget(self.units)
-        left.addLayout(row)
-        self.kind = combo(ANALYSIS_KINDS, "slope")
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Analysis type:"))
-        row.addWidget(self.kind, 1)
-        left.addLayout(row)
-        for label, action in (("New project", "new"), ("Open project...", "open"), ("AI Slope Builder...", "ai")):
-            b = QPushButton(label)
-            b.setMinimumHeight(40)
-            b.setStyleSheet("text-align:left;padding-left:14px;font-size:11pt")
-            b.clicked.connect(lambda _=False, a=action: self.pick(a, self.kind.currentData() if a == "new" else None))
-            left.addWidget(b)
-        left.addStretch(1)
-        root.addLayout(left, 1)
-
-        right = QVBoxLayout()
-        right.addWidget(QLabel("<b>Examples</b>"))
-        self.ex_list = QListWidget()
-        for e in examples:
-            self.ex_list.addItem(e)
-        self.ex_list.itemDoubleClicked.connect(lambda it: self.pick("example", it.text()))
-        right.addWidget(self.ex_list)
-        right.addWidget(QLabel("<b>Recent files</b>"))
-        self.recent = QListWidget()
-        for r in recent:
-            self.recent.addItem(QListWidgetItem(r))
-        self.recent.itemDoubleClicked.connect(lambda it: self.pick("recent", it.text()))
-        right.addWidget(self.recent)
-        root.addLayout(right, 1)
-
-    def pick(self, action, arg=None):
-        self.choice = (action, arg, self.units.currentData())
-        self.accept()
 
 
 # ---------------------------------------------------------------------------
@@ -473,40 +414,54 @@ class MaterialsDialog(QDialog):
 # Analysis settings
 # ---------------------------------------------------------------------------
 INITIAL = {"parent": "From parent analysis", "water_table": "Water table (piezometric line)", "value": "Uniform value"}
-STRESS_TYPES = {"insitu": "In situ (gravity)", "load": "Load-deformation", "consolidation": "Coupled consolidation"}
-TIME = [("transient", "Transient (time-dependent)", "bool"), ("duration", "Duration (s)", "float"),
-        ("n_steps", "Number of time steps", "int"), ("step_growth", "Time step growth ratio", "float")]
+STRESS_TYPES = {"insitu": "In Situ", "load": "Load-Deformation", "consolidation": "Coupled Stress/PWP (consolidation)"}
+INSITU_METHODS = {"gravity": "Gravity Activation", "k0": "K0 Procedure"}
+STRESS_PWP = {"none": "(none)", "seepage": "Parent Analysis", "piezometric": "Piezometric Surface"}
+TIME = [("duration", "Duration (s)", "float"), ("n_steps", "Number of time steps", "int"),
+        ("step_growth", "Time step growth ratio", "float")]
+STEADY = {"steady": "Steady-State", "transient": "Transient"}
+
+# Analysis Type combo in the header: (attribute, {stored value: label}, {combo key: stored value} or None)
+ANALYSIS_TYPES = {
+    "slope": ("method", SLOPE_METHODS, None),
+    "seepage": ("transient", STEADY, {"steady": False, "transient": True}),
+    "thermal": ("transient", STEADY, {"steady": False, "transient": True}),
+    "air": ("transient", STEADY, {"steady": False, "transient": True}),
+    "stress": ("stress_type", STRESS_TYPES, None),
+    "dynamic": ("equivalent_linear", {"linear": "Linear Elastic", "eqlin": "Equivalent Linear"},
+                {"linear": False, "eqlin": True}),
+    "transport": (None, {"ad": "Advection-Dispersion"}, None),
+}
 
 KIND_TABS = {
     "seepage": [("Seepage", [("mesh_size", "Mesh element size", "float", "length"),
                              ("unsaturated", "Include unsaturated flow (free phreatic surface)", "bool"),
-                             *TIME, ("initial", "Initial conditions", "choice", INITIAL),
+                             ("initial", "Initial conditions", "choice", INITIAL),
                              ("initial_value", "Initial total head", "float", "length"),
-                             ("max_iter", "Max iterations per step", "int"), ("tolerance", "Head tolerance", "float")])],
-    "stress": [("Stress", [("stress_type", "Analysis type", "choice", STRESS_TYPES),
+                             ("max_iter", "Max iterations per step", "int"), ("tolerance", "Head tolerance", "float")]),
+                ("Time", TIME)],
+    "stress": [("Stress", [("insitu_method", "Method", "choice", INSITU_METHODS),
+                           ("pwp", "Final PWP conditions from", "choice", STRESS_PWP),
                            ("mesh_size", "Mesh element size", "float", "length"),
-                           ("pwp", "Pore-water pressure", "choice", {k: v for k, v in PWP_MODES.items() if k != "ru"}),
                            ("load_steps", "Load steps", "int"),
                            ("srm", "Compute strength reduction factor of safety (in situ)", "bool"),
-                           ("max_iter", "Max plastic iterations", "int"),
-                           ("duration", "Consolidation duration (s)", "float"),
-                           ("n_steps", "Consolidation time steps", "int"),
-                           ("step_growth", "Time step growth ratio", "float")])],
+                           ("max_iter", "Max plastic iterations", "int")]),
+               ("Time", TIME)],
     "dynamic": [("Dynamic", [("mesh_size", "Mesh element size", "float", "length"), ("dt", "Time step (s)", "float"),
-                             ("equivalent_linear", "Equivalent linear (strain-dependent G and damping)", "bool"),
                              ("n_eq_iter", "Equivalent linear iterations", "int"),
                              ("motion", "Input acceleration", "table2", ["time (s)", "acceleration (g)"])])],
-    "thermal": [("Thermal", [("mesh_size", "Mesh element size", "float", "length"), *TIME,
+    "thermal": [("Thermal", [("mesh_size", "Mesh element size", "float", "length"),
                              ("initial", "Initial conditions", "choice", {k: v for k, v in INITIAL.items() if k != "water_table"}),
                              ("initial_value", "Initial temperature", "float", "temperature"),
-                             ("max_iter", "Max iterations per step", "int"), ("tolerance", "Temperature tolerance", "float")])],
-    "transport": [("Transport", [("duration", "Duration (s)", "float"), ("n_steps", "Number of time steps", "int"),
-                                 ("step_growth", "Time step growth ratio", "float"),
-                                 ("initial_value", "Initial concentration", "float", "concentration"),
-                                 ("particles", "Particle tracking start points", "table2", ["x", "y"])])],
-    "air": [("Air Flow", [("mesh_size", "Mesh element size", "float", "length"), *TIME,
+                             ("max_iter", "Max iterations per step", "int"), ("tolerance", "Temperature tolerance", "float")]),
+                ("Time", TIME)],
+    "transport": [("Transport", [("initial_value", "Initial concentration", "float", "concentration"),
+                                 ("particles", "Particle tracking start points", "table2", ["x", "y"])]),
+                  ("Time", TIME)],
+    "air": [("Air Flow", [("mesh_size", "Mesh element size", "float", "length"),
                           ("initial_value", "Initial air pressure", "float", "pressure"),
-                          ("max_iter", "Max iterations per step", "int"), ("tolerance", "Pressure tolerance", "float")])],
+                          ("max_iter", "Max iterations per step", "int"), ("tolerance", "Pressure tolerance", "float")]),
+            ("Time", TIME)],
 }
 
 SLOPE_EXTRA = [("Loads and Cracks", [
@@ -518,67 +473,134 @@ SLOPE_EXTRA = [("Loads and Cracks", [
     ("opt_iterations", "Optimization trials", "int")])]
 
 
-class AnalysisDialog(QDialog):
+def descendants(project, aid):
+    out, changed = set(), True
+    while changed:
+        changed = False
+        for o in project.analyses:
+            if (o.parent_id == aid or o.parent_id in out) and o.id not in out:
+                out.add(o.id)
+                changed = True
+    return out
+
+
+class AnalysisEditor(QWidget):
+    """Settings of one analysis: header (name, parent, analysis type, description) and tabs."""
+
+    changed = Signal()
+
     def __init__(self, project, analysis, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Analysis Settings - {analysis.name}")
-        self.resize(640, 640)
+        from .icons import kind_pixmap
         self.p, self.a = project, analysis
         a = analysis
         v = QVBoxLayout(self)
-        tabs = QTabWidget()
-        v.addWidget(tabs)
+        v.setContentsMargins(0, 0, 0, 0)
 
-        g = QWidget(); f = QFormLayout(g)
+        head = QGridLayout()
+        icon = QLabel()
+        icon.setPixmap(kind_pixmap(a.kind, 40))
+        head.addWidget(icon, 0, 0, 3, 1, Qt.AlignTop)
         self.name = QLineEdit(a.name)
-        self.desc = QLineEdit(a.description)
+        self.name.textEdited.connect(lambda *_: self.changed.emit())
         self.parent_cb = QComboBox()
         self.parent_cb.addItem("(none)", None)
-        banned = self._descendants(a.id) | {a.id}
+        banned = descendants(project, a.id) | {a.id}
         for o in project.analyses:
             if o.id not in banned:
-                self.parent_cb.addItem(f"{o.name}  [{ANALYSIS_KINDS[o.kind].split(' (')[0]}]", o.id)
+                self.parent_cb.addItem(o.name, o.id)
         self.parent_cb.setCurrentIndex(max(0, self.parent_cb.findData(a.parent_id)))
-        f.addRow("Name", self.name)
-        f.addRow("Type", QLabel(ANALYSIS_KINDS.get(a.kind, a.kind)))
-        f.addRow("Description", self.desc)
-        f.addRow("Parent analysis", self.parent_cb)
-        hint = QLabel("Children use their parents' results: seepage gives pore pressures and flow, "
-                      "stress gives stresses for the finite element slope method, dynamic gives Newmark "
-                      "displacements, and earlier steps give initial conditions.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color:#555")
-        f.addRow(hint)
-        tabs.addTab(g, "General")
-        self.forms = []
+        self.parent_cb.currentIndexChanged.connect(lambda *_: self.changed.emit())
+        attr, labels, to_value = ANALYSIS_TYPES.get(a.kind, (None, {"": a.kind}, None))
+        self.type_attr, self.type_map = attr, to_value
+        current = None
+        if attr:
+            val = getattr(a, attr)
+            current = next((k for k, x in to_value.items() if x == val), None) if to_value else val
+        self.type_cb = combo(labels, current)
+        self.type_cb.setEnabled(len(labels) > 1)
+        self.type_cb.currentIndexChanged.connect(self._type_changed)
+        for r, (lab, w) in enumerate((("Name:", self.name), ("Parent:", self.parent_cb),
+                                      ("Analysis Type:", self.type_cb))):
+            head.addWidget(QLabel(lab), r, 1)
+            head.addWidget(w, r, 2)
+        head.addWidget(QLabel("Description:"), 0, 3)
+        self.desc = QPlainTextEdit(a.description)
+        self.desc.setMaximumHeight(56)
+        head.addWidget(self.desc, 1, 3, 2, 1)
+        head.setColumnStretch(2, 2)
+        head.setColumnStretch(3, 2)
+        v.addLayout(head)
 
+        self.tabs = QTabWidget()
+        v.addWidget(self.tabs, 1)
+        self.forms = []
+        self.time_form = None
         if a.kind == "slope":
-            self._slope_tabs(tabs)
+            self._slope_tabs(self.tabs)
         for title, spec in KIND_TABS.get(a.kind, []) + (SLOPE_EXTRA if a.kind == "slope" else []):
             form = Form(spec, project.unit)
             form.load(a)
             self.forms.append(form)
-            tabs.addTab(form, title)
+            if title == "Time":
+                self.time_form = form
+                self.time_note = QLabel()
+                self.time_note.setStyleSheet("color:#666")
+                form.layout().insertRow(0, self.time_note)
+            self.tabs.addTab(form, title)
+        hint = QLabel("Children use their parents' results: seepage gives pore pressures and flow, stress gives "
+                      "stresses for the finite element slope method, dynamic gives Newmark displacements, and "
+                      "earlier steps give initial conditions.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#666")
+        v.addWidget(hint)
+        self._type_changed()
 
-        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.accepted.connect(self.try_accept)
-        bb.rejected.connect(self.reject)
-        v.addWidget(bb)
+    # ------------------------------------------------------------------
+    def type_value(self):
+        key = self.type_cb.currentData()
+        return self.type_map[key] if self.type_map else key
 
-    def _descendants(self, aid):
-        out, changed = set(), True
-        while changed:
-            changed = False
-            for o in self.p.analyses:
-                if (o.parent_id == aid or o.parent_id in out) and o.id not in out:
-                    out.add(o.id)
-                    changed = True
-        return out
+    def _field(self, key):
+        for f in self.forms:
+            if key in f.w:
+                return f, f.w[key]
+        return None, None
+
+    def _enable(self, key, on):
+        f, w = self._field(key)
+        if w is not None:
+            w.setEnabled(on)
+            lab = f.layout().labelForField(w)
+            if lab is not None:
+                lab.setEnabled(on)
+
+    def _type_changed(self, *_):
+        a, val = self.a, self.type_value()
+        if a.kind == "stress":
+            self._enable("insitu_method", val == "insitu")
+            self._enable("srm", val == "insitu")
+            self._enable("load_steps", val != "consolidation")
+            timed = val == "consolidation"
+        elif a.kind == "dynamic":
+            self._enable("n_eq_iter", bool(val))
+            timed = True
+        elif a.kind == "slope":
+            self.inter.setEnabled(val == "morgenstern_price")
+            self.inter_pts.setEnabled(val == "morgenstern_price")
+            timed = False
+        else:
+            timed = bool(val) if a.kind in ("seepage", "thermal", "air") else True
+        if self.time_form is not None:
+            for key in self.time_form.w:
+                self._enable(key, timed)
+            self.time_note.setText("" if timed else "Steady state: this analysis has no time steps.")
+        self.changed.emit()
 
     def _slope_tabs(self, tabs):
         a, project = self.a, self.p
+        self.method = self.type_cb
         t = QWidget(); f = QFormLayout(t)
-        self.method = combo(SLOPE_METHODS, a.method)
         self.inter = combo(INTERSLICE_FUNCTIONS, a.interslice)
         self.inter_pts = QPlainTextEdit("\n".join(f"{x:g}, {y:g}" for x, y in a.interslice_points))
         self.inter_pts.setMaximumHeight(60)
@@ -586,11 +608,10 @@ class AnalysisDialog(QDialog):
         self.nsl = ispin(a.n_slices, 5, 500)
         self.pwp = combo(PWP_MODES, a.pwp)
         self.ru = dspin(a.ru, 0, 1, 3, 0.05)
-        f.addRow("Method", self.method)
-        f.addRow("Interslice function (M-P)", self.inter)
+        f.addRow("Interslice function (Morgenstern-Price)", self.inter)
         f.addRow("Interslice data points", self.inter_pts)
         f.addRow("Number of slices", self.nsl)
-        f.addRow("Pore-water pressure", self.pwp)
+        f.addRow("PWP conditions from", self.pwp)
         f.addRow("Ru", self.ru)
         tabs.addTab(t, "Slope Stability")
 
@@ -676,30 +697,32 @@ class AnalysisDialog(QDialog):
             rows.append([float(p) for p in parts])
         return rows
 
-    def try_accept(self):
+    def build(self):
+        """A validated copy of the analysis with the edited settings. Raises ValueError."""
         a = copy.deepcopy(self.a)
-        try:
-            a.name = self.name.text().strip() or a.name
-            a.description = self.desc.text().strip()
-            a.parent_id = self.parent_cb.currentData()
-            if a.kind == "slope":
-                self._store_slope(a)
-            for form in self.forms:
-                form.store(a)
-            parent = self.p.analysis(a.parent_id)
-            if a.kind == "transport" and (parent is None or parent.kind != "seepage"):
-                raise ValueError("Contaminant transport needs a seepage analysis as its parent.")
-            if a.kind in ("seepage", "thermal", "air") and a.transient and (a.duration <= 0 or a.n_steps < 1):
-                raise ValueError("A transient analysis needs a positive duration and at least one time step.")
-            if a.kind == "dynamic" and (len(a.motion) < 2 or a.dt <= 0):
-                raise ValueError("Enter at least two rows of input acceleration and a positive time step.")
-            if getattr(a, "mesh_size", 1) <= 0:
-                raise ValueError("Mesh size must be positive.")
-        except ValueError as e:
-            QMessageBox.warning(self, "Invalid input", str(e))
-            return
-        self.a.__dict__.update(a.__dict__)
-        self.accept()
+        a.name = self.name.text().strip() or a.name
+        a.description = self.desc.toPlainText().strip()
+        a.parent_id = self.parent_cb.currentData()
+        for form in self.forms:
+            form.store(a)
+        if self.type_attr:
+            setattr(a, self.type_attr, self.type_value())
+        if a.kind == "slope":
+            self._store_slope(a)
+        parent = self.p.analysis(a.parent_id)
+        if a.kind == "transport" and (parent is None or parent.kind != "seepage"):
+            raise ValueError("Contaminant transport needs a seepage analysis as its parent.")
+        if a.kind in ("seepage", "thermal", "air") and a.transient and (a.duration <= 0 or a.n_steps < 1):
+            raise ValueError("A transient analysis needs a positive duration and at least one time step.")
+        if a.kind == "stress" and a.stress_type == "consolidation" and (a.duration <= 0 or a.n_steps < 1):
+            raise ValueError("A consolidation analysis needs a positive duration and at least one time step.")
+        if a.kind == "stress" and a.pwp == "seepage" and parent is None:
+            raise ValueError("'Final PWP conditions from: Parent Analysis' needs a parent analysis.")
+        if a.kind == "dynamic" and (len(a.motion) < 2 or a.dt <= 0):
+            raise ValueError("Enter at least two rows of input acceleration and a positive time step.")
+        if getattr(a, "mesh_size", 1) <= 0:
+            raise ValueError("Mesh size must be positive.")
+        return a
 
     def _store_slope(self, a):
         circles = [r for r in self._parse_rows(self.circles.toPlainText(), 3) if r]
@@ -723,7 +746,6 @@ class AnalysisDialog(QDialog):
             raise ValueError("Block grids need 8 numbers: left x1 y1 x2 y2, right x1 y1 x2 y2.")
         if self.pwp.currentData() == "seepage" and self.parent_cb.currentData() is None:
             raise ValueError("Pore pressure 'From seepage analysis' needs a parent seepage analysis.")
-        a.method = self.method.currentData()
         a.interslice = self.inter.currentData()
         a.interslice_points = [r for r in self._parse_rows(self.inter_pts.toPlainText(), 2) if r]
         a.n_slices = self.nsl.value()
@@ -743,6 +765,258 @@ class AnalysisDialog(QDialog):
         a.sensitivity_param = self.sens.currentData()
         a.sensitivity_low, a.sensitivity_high = self.slo.value(), self.shi.value()
         a.sensitivity_steps = self.sst.value()
+
+
+class AnalysisDialog(QDialog):
+    """Settings of a single analysis."""
+
+    def __init__(self, project, analysis, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Analysis Settings - {analysis.name}")
+        self.resize(720, 660)
+        self.a = analysis
+        v = QVBoxLayout(self)
+        self.editor = AnalysisEditor(project, analysis, self)
+        self.forms = self.editor.forms
+        v.addWidget(self.editor)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.try_accept)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+
+    def try_accept(self):
+        try:
+            a = self.editor.build()
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid input", str(e))
+            return
+        self.a.__dict__.update(a.__dict__)
+        self.accept()
+
+
+class DefineProjectDialog(QDialog):
+    """All analyses of the project in one place: the analysis tree on the left (Add / Delete), the
+    selected analysis' settings on the right. Works on a copy; OK applies everything at once."""
+
+    def __init__(self, project, current_id=None, parent=None):
+        super().__init__(parent)
+        from .icons import kind_icon
+        self._kind_icon = kind_icon
+        self.setWindowTitle("Define Analyses")
+        self.resize(1180, 680)
+        self.p = copy.copy(project)          # results are not copied (they can be large)
+        self.p.analyses = []
+        for a in project.analyses:
+            res, a.results = a.results, None
+            try:
+                self.p.analyses.append(copy.deepcopy(a))
+            finally:
+                a.results = res
+        self.p.boundary_conditions = copy.deepcopy(project.boundary_conditions)
+        self.editors = {}
+        root = QHBoxLayout(self)
+
+        left = QVBoxLayout()
+        bar = QHBoxLayout()
+        bar.addWidget(QLabel("Analyses:"))
+        bar.addStretch(1)
+        add = QPushButton("Add")
+        menu = QMenu(add)
+        for kind, label in ANALYSIS_KINDS.items():
+            menu.addAction(kind_icon(kind), label, lambda k=kind: self.add(k))
+        add.setMenu(menu)
+        self.add_btn = add
+        dele = QPushButton("Delete")
+        dele.clicked.connect(self.delete)
+        bar.addWidget(add)
+        bar.addWidget(dele)
+        left.addLayout(bar)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setIconSize(QSize(18, 18))
+        self.tree.currentItemChanged.connect(self._selected)
+        left.addWidget(self.tree, 1)
+        tip = QLabel("Add puts the new analysis under the selected one (its parent).")
+        tip.setStyleSheet("color:#666")
+        left.addWidget(tip)
+        lw = QWidget()
+        lw.setLayout(left)
+        lw.setMinimumWidth(380)
+
+        right = QVBoxLayout()
+        self.stack = QStackedWidget()
+        right.addWidget(self.stack, 1)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.try_accept)
+        bb.rejected.connect(self.reject)
+        right.addWidget(bb)
+        root.addWidget(lw, 2)
+        root.addLayout(right, 3)
+
+        self._current = None
+        self.refresh(current_id if self.p.analysis(current_id) else (self.p.analyses[0].id if self.p.analyses else None))
+
+    # ------------------------------------------------------------------
+    def _label(self, aid):
+        a = self.p.analysis(aid)
+        ed = self.editors.get(aid)
+        name = ed.name.text().strip() if ed else a.name
+        kind = {"slope": "Slope", "seepage": "Seepage", "stress": "Stress", "dynamic": "Dynamic",
+                "thermal": "Thermal", "transport": "Transport", "air": "Air flow"}.get(a.kind, a.kind)
+        return f"{name or a.name}  [{kind}]"
+
+    def _parent_of(self, aid):
+        ed = self.editors.get(aid)
+        return ed.parent_cb.currentData() if ed else self.p.analysis(aid).parent_id
+
+    def refresh(self, select_id=None):
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        top = QTreeWidgetItem([self.p.title or "(untitled)"])
+        top.setIcon(0, self._kind_icon("slope"))
+        geo = QTreeWidgetItem(["2D Geometry"])
+        geo.setIcon(0, self.style().standardIcon(QStyle.SP_DirIcon))
+        top.addChild(geo)
+        self.tree.addTopLevelItem(top)
+        items = {}
+        ids = {a.id for a in self.p.analyses}
+
+        def add(a, parent_item, seen):
+            it = QTreeWidgetItem([self._label(a.id)])
+            it.setIcon(0, self._kind_icon(a.kind))
+            it.setData(0, Qt.UserRole, a.id)
+            parent_item.addChild(it)
+            items[a.id] = it
+            for c in self.p.analyses:
+                if self._parent_of(c.id) == a.id and c.id not in seen:
+                    add(c, it, seen | {c.id})
+
+        for a in self.p.analyses:
+            if self._parent_of(a.id) not in ids:
+                add(a, geo, {a.id})
+        self.tree.expandAll()
+        self.tree.blockSignals(False)
+        target = items.get(select_id) or items.get(self._current)
+        if target is not None:
+            self.tree.setCurrentItem(target)
+            self._show(target.data(0, Qt.UserRole))
+
+    def _editor(self, aid):
+        if aid not in self.editors:
+            ed = AnalysisEditor(self.p, self.p.analysis(aid), self)
+            ed.changed.connect(lambda aid=aid: self._relabel(aid))
+            ed.parent_cb.currentIndexChanged.connect(lambda *_: self.refresh(aid))
+            self.editors[aid] = ed
+            self.stack.addWidget(ed)
+        return self.editors[aid]
+
+    def _relabel(self, aid):
+        it = self._find(aid)
+        if it is not None:
+            it.setText(0, self._label(aid))
+
+    def _find(self, aid):
+        itr = QTreeWidgetItemIterator(self.tree)
+        while itr.value():
+            if itr.value().data(0, Qt.UserRole) == aid:
+                return itr.value()
+            itr += 1
+        return None
+
+    def _show(self, aid):
+        self._current = aid
+        self.stack.setCurrentWidget(self._editor(aid))
+
+    def _selected(self, item, _prev=None):
+        aid = item.data(0, Qt.UserRole) if item is not None else None
+        if aid is not None:
+            self._show(aid)
+
+    def selected_id(self):
+        return self._current
+
+    def add(self, kind):
+        parent = self.p.analysis(self._current)
+        names = {"slope": "Slope Stability", "seepage": "Seepage", "stress": "Stress-Deformation",
+                 "dynamic": "Dynamic", "thermal": "Thermal", "transport": "Contaminant Transport", "air": "Air Flow"}
+        n = sum(1 for a in self.p.analyses if a.kind == kind) + 1
+        a = self.p.add_analysis(f"{names[kind]}{'' if n == 1 else f' {n}'}", kind=kind)
+        if parent is not None:
+            a.parent_id = parent.id
+            if parent.kind in ("seepage", "stress", "thermal", "air", "transport"):
+                a.mesh_size = parent.mesh_size
+            if kind in ("seepage", "thermal") and parent.kind == kind:
+                a.transient, a.initial = True, "parent"
+            if kind == "stress" and parent.kind == "stress":
+                a.stress_type = "load"
+            if kind in ("slope", "stress") and parent.kind == "seepage":
+                a.pwp = "seepage"
+            if kind == "slope" and parent.kind == "stress":
+                a.method = "finite_element"
+        if kind == "slope":
+            if self.p.regions:
+                (e1, e2), (x1, x2) = auto_entry_exit(self.p)
+                a.search.entry_x1, a.search.entry_x2, a.search.exit_x1, a.search.exit_x2 = e1, e2, x1, x2
+            if self.p.piezometric_line and a.pwp == "none":
+                a.pwp = "piezometric"
+        # editors built earlier list parents from the old analysis set: rebuild them
+        self._rebuild_editors()
+        self.refresh(a.id)
+        return a
+
+    def _rebuild_editors(self):
+        """Keep edits, then drop the editors so parent lists are rebuilt from the current analyses."""
+        for aid, ed in list(self.editors.items()):
+            try:
+                built = ed.build()
+            except ValueError:
+                built = None
+            if built is not None:
+                self.p.analysis(aid).__dict__.update(built.__dict__)
+            self.stack.removeWidget(ed)
+            ed.deleteLater()
+        self.editors.clear()
+
+    def delete(self):
+        a = self.p.analysis(self._current)
+        if a is None:
+            return
+        if len(self.p.analyses) == 1:
+            QMessageBox.information(self, "Define Analyses", "A project needs at least one analysis.")
+            return
+        kids = descendants(self.p, a.id)
+        msg = f"Delete '{a.name}'" + (f" and its {len(kids)} child analyses" if kids else "") + "?"
+        if QMessageBox.question(self, "Delete analysis", msg) != QMessageBox.Yes:
+            return
+        self._rebuild_editors()
+        gone = kids | {a.id}
+        self.p.analyses = [o for o in self.p.analyses if o.id not in gone]
+        for bc in getattr(self.p, "boundary_conditions", []):
+            if bc.analyses:
+                bc.analyses = [i for i in bc.analyses if i not in gone]
+        self._current = None
+        self.refresh(a.parent_id if a.parent_id not in gone else None)
+        if self._current is None and self.p.analyses:
+            self.refresh(self.p.analyses[0].id)
+
+    def try_accept(self):
+        for aid, ed in self.editors.items():
+            try:
+                built = ed.build()
+            except ValueError as e:
+                self.tree.setCurrentItem(self._find(aid))
+                QMessageBox.warning(self, "Invalid input", f"{ed.name.text()}: {e}")
+                return
+            self.p.analysis(aid).__dict__.update(built.__dict__)
+        for a in self.p.analyses:
+            seen, cur = {a.id}, a.parent_id
+            while cur is not None and self.p.analysis(cur) is not None:
+                if cur in seen:
+                    QMessageBox.warning(self, "Invalid input", f"'{a.name}' is its own ancestor; change its parent.")
+                    return
+                seen.add(cur)
+                cur = self.p.analysis(cur).parent_id
+        self.accept()
 
 
 # ---------------------------------------------------------------------------

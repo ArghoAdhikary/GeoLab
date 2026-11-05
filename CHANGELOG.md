@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.4.0 - 2026-11-06
+
+- New home page inside the main window: **New** (choose units template, geometry dimension and the
+  analysis type to start with), **Open** (recent projects and examples) and getting-started links.
+  Docks and toolbars appear once a project is open.
+- New **Define Analyses** window (Define > Analyses, or double-click an analysis): the analysis tree
+  on the left with Add and Delete, and the selected analysis on the right with Name, Parent,
+  Analysis Type and Description above its settings tabs. Time settings have their own tab and are
+  greyed out for steady-state and in situ analyses. Edits apply together on OK and can be undone.
+- In situ stress analyses can use the **K0 procedure** as well as gravity activation:
+  sigma'v from the weight of the soil above, sigma'h = K0 sigma'v.
+- Stress analyses label pore pressures as "Final PWP conditions from": none, parent analysis or
+  piezometric surface.
+- Painted icons for each analysis type.
+
 ## 2.3.0 - 2026-11-05
 
 - `.gsz` import now reads materials (stress model, stiffness, unit weight, void ratio, conductivity,

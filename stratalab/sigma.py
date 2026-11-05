@@ -259,6 +259,42 @@ def _initial_stress(project, mesh, model, analysis, parent):
     return np.zeros((mesh.ne, mesh.ngp, 4))
 
 
+def overburden(project, x, y):
+    """Total vertical stress from the weight of the soil columns above points (x, y)."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    mats = {m.id: m for m in project.materials}
+    sv = np.zeros(np.broadcast(x, y).shape)
+    for r in project.regions:
+        m = mats.get(r.material_id)
+        if m is None or m.stress_model == "none" or len(r.points) < 3:
+            continue
+        pts = np.asarray(r.points, float)
+        ys = []
+        for (x1, y1), (x2, y2) in zip(pts, np.roll(pts, -1, axis=0)):
+            if x1 == x2:
+                continue
+            inside = ((x1 <= x) & (x < x2)) | ((x2 <= x) & (x < x1))
+            ys.append(np.where(inside, y1 + (x - x1) / (x2 - x1) * (y2 - y1), np.nan))
+        if len(ys) < 2:
+            continue
+        Y = np.sort(np.stack(np.broadcast_arrays(*ys)), axis=0)     # NaN sorts last
+        for k in range(0, Y.shape[0] - 1, 2):
+            length = np.clip(Y[k + 1] - np.maximum(Y[k], y), 0.0, None)
+            sv += m.unit_weight * np.nan_to_num(length)
+    return sv
+
+
+def k0_stress(project, x, y, k0, u):
+    """K0 procedure: sigma'v from the overburden, sigma'h = sigma'z = K0 sigma'v, no shear
+    (effective stresses, tension positive, per Gauss point)."""
+    sv_eff = np.clip(overburden(project, x, y) - u, 0.0, None)
+    k = np.asarray(k0, float).reshape(-1, *([1] * (sv_eff.ndim - 1)))
+    sig = np.zeros(sv_eff.shape + (4,))
+    sig[..., 1] = -sv_eff
+    sig[..., 0] = sig[..., 3] = -k * sv_eff
+    return sig
+
+
 def _gravity_load(mesh, model, u_gp):
     """Body force of the total unit weight plus the pore pressure term (effective stress formulation)."""
     fe = np.zeros((mesh.ne, 12))
@@ -314,6 +350,11 @@ def run_stress(project, analysis, progress=None, cancel=None, parent=None, seep_
     sysm = _System(mesh, model, fixed)
     u_gp = _pore_pressure(project, analysis, mesh.gx, mesh.gy, seep_results)
     uc_total = np.array([fixed[i] for i in sysm.cidx])
+    if analysis.stress_type == "insitu" and getattr(analysis, "insitu_method", "gravity") == "k0":
+        sig = k0_stress(project, mesh.gx, mesh.gy, model.k0, u_gp)
+        return _results(project, mesh, model, np.zeros(2 * mesh.nn), sig, u_gp, analysis,
+                        {"converged": True, "history": [], "stress_type": "insitu", "reactions": {},
+                         "insitu_method": "k0"})
     if analysis.stress_type == "insitu":
         sig = np.zeros((mesh.ne, mesh.ngp, 4))
         F_total = mesh.vector(_gravity_load(mesh, model, u_gp)) + F_bc

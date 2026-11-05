@@ -40,6 +40,7 @@ directly with another vendor's software.
 | Feature | Verified by |
 |---|---|
 | In situ (gravity) with effective stresses below the water table | sigma_v = gamma z, K0 on effective stress (2 %) |
+| In situ by the K0 procedure (sigma'v from the soil column above, sigma'h = K0 sigma'v) | exact hand calculation |
 | Load-deformation in steps, pressure / shear / force / displacement boundaries, reactions | 1D compression exact (0.1 %) |
 | Elastic-perfectly plastic Mohr-Coulomb (non-associated), viscoplastic algorithm | Prandtl strip footing 5.10 su vs 5.14 su exact |
 | Strength reduction factor of safety | Griffiths & Lane slope 1.36 (published ~1.4) |

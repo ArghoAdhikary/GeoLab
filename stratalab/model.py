@@ -411,6 +411,7 @@ class Analysis:
     initial_value: float = 0.0
     # stress-deformation
     stress_type: str = "insitu"         # insitu | load | consolidation
+    insitu_method: str = "gravity"      # gravity (finite element gravity activation) | k0 (K0 procedure)
     load_steps: int = 10
     srm: bool = False                   # strength reduction factor of safety
     # dynamic

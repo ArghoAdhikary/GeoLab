@@ -21,8 +21,9 @@ from ..model import (ANALYSIS_KINDS, BC_KINDS, BC_TYPES, KIND_BCS, REINFORCEMENT
 from ..report import build_report
 from ..solver import solve, verify
 from .canvas import Canvas
-from .dialogs import (AIDialog, AnalysisDialog, BCDialog, GraphDialog, MaterialsDialog, PointsDialog,
-                      ProjectDialog, ReinforcementDialog, SliceTable, StartPage, TextDialog)
+from .dialogs import (AIDialog, BCDialog, DefineProjectDialog, GraphDialog, MaterialsDialog, PointsDialog,
+                      ProjectDialog, ReinforcementDialog, SliceTable, TextDialog)
+from .home import HomePage
 from .pdf import export_pdf, paint_pages
 from .render import Renderer, View, available_fields, project_bounds, result_times
 
@@ -81,7 +82,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.resize(1360, 860)
         self.canvas = Canvas(self)
-        self.setCentralWidget(self.canvas)
+        self.home = HomePage(self)
+        self.home.chosen.connect(self.home_chosen)
+        from PySide6.QtWidgets import QStackedWidget
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self.canvas)
+        self.pages.addWidget(self.home)
+        self.setCentralWidget(self.pages)
+        self._hidden_on_home = []
         self._build_docks()
         self._build_actions()
         self._build_menus()
@@ -193,7 +201,7 @@ class MainWindow(QMainWindow):
         self.a_graph = A("&Graph...", self.show_graph)
         self.a_proj = A("&Project Properties...", self.edit_project)
         self.a_mats = A("&Materials...", self.edit_materials, "Ctrl+M")
-        self.a_analysis = A("&Analysis Settings...", self.edit_analysis, "Ctrl+Shift+A")
+        self.a_analysis = A("&Analyses...", self.edit_analysis, "Ctrl+Shift+A")
         self.a_add = {k: A(v, lambda _=False, kk=k: self.add_analysis(kk)) for k, v in ANALYSIS_KINDS.items()}
         self.a_add_child = {k: A(v, lambda _=False, kk=k: self.add_analysis(kk, child=True))
                             for k, v in ANALYSIS_KINDS.items()}
@@ -224,7 +232,7 @@ class MainWindow(QMainWindow):
         self.a_stop.setEnabled(False)
         self.a_ai = A("AI &Slope Builder...", self.ai_builder, "Ctrl+Shift+I")
         self.a_reset = A("&Reset Window Layout", self.reset_layout)
-        self.a_start = A("&Start Page...", self.show_start)
+        self.a_start = A("&Start Page", self.show_start)
         self.a_guide = A("&Quick Guide", self.quick_guide, "F1")
         self.a_about = A("&About", self.about)
 
@@ -746,6 +754,7 @@ class MainWindow(QMainWindow):
         return r == QMessageBox.Discard
 
     def set_project(self, project, path=None, dirty=False):
+        self.show_workspace()
         self.project = project
         self.path = Path(path) if path else None
         self.dirty = dirty
@@ -1009,20 +1018,40 @@ class MainWindow(QMainWindow):
             self.after_change("Edit materials")
 
     def edit_analysis(self):
-        a = self.current_analysis()
-        if a is None:
+        """Define Analyses window: the analysis tree with Add / Delete and the selected analysis' settings."""
+        from dataclasses import fields
+
+        def key(a):
+            return {f.name: getattr(a, f.name) for f in fields(a) if f.name != "results"}
+        d = DefineProjectDialog(self.project, self.current_aid, self)
+        if not d.exec():
             return
-        before = self.project.to_dict()
-        d = AnalysisDialog(self.project, a, self)
-        if d.exec():
-            self.undo_stack.append(before)
-            self.redo_stack.clear()
-            a.results = None
-            for c in self.project.children(a.id):
-                c.results = None
-            self.dirty = True
-            self.set_view("define")
+        old = {a.id: a for a in self.project.analyses}
+        new = d.p.analyses
+        stale = {a.id for a in new if a.id not in old or key(old[a.id]) != key(a)}
+        removed = set(old) - {a.id for a in new}
+        sel = d.selected_id()
+        if not stale and not removed:
+            self.current_aid = sel if self.project.analysis(sel) else self.current_aid
             self.refresh_all()
+            return
+        self.before_change()
+        for a in new:
+            a.results = None if a.id in stale else old[a.id].results
+        changed = True
+        while changed:          # children of re-defined analyses must be solved again too
+            changed = False
+            for a in new:
+                if a.results is not None and a.parent_id in stale:
+                    a.results = None
+                    stale.add(a.id)
+                    changed = True
+        self.project.analyses = new
+        self.project.boundary_conditions = d.p.boundary_conditions
+        self.current_aid = sel if self.project.analysis(sel) else (new[0].id if new else None)
+        self.dirty = True
+        self.set_view("define")
+        self.refresh_all()
 
     def add_analysis(self, kind, child=False):
         parent = self.current_analysis() if child else None
@@ -1416,20 +1445,49 @@ class MainWindow(QMainWindow):
             dock.show()
 
     def show_start(self):
-        d = StartPage(self.recent_files(), list(EXAMPLES), self)
-        if not d.exec() or not d.choice:
-            return
-        action, arg, units = d.choice
+        """Home page inside the window: New, Open, recent projects, examples and getting-started links."""
+        self.home.populate(self.recent_files(), list(EXAMPLES), self.project.units)
+        if self.pages.currentWidget() is not self.home:
+            self._hidden_on_home = [w for w in self.findChildren(QDockWidget) + self.findChildren(QToolBar)
+                                    if w.isVisible()]
+            for w in self._hidden_on_home:
+                w.hide()
+            self.pages.setCurrentWidget(self.home)
+        self.setWindowTitle(APP_NAME)
+
+    def show_workspace(self):
+        if self.pages.currentWidget() is self.home:
+            self.pages.setCurrentWidget(self.canvas)
+            for w in self._hidden_on_home:
+                w.show()
+            self._hidden_on_home = []
+
+    def on_home(self):
+        return self.pages.currentWidget() is self.home
+
+    def home_chosen(self, action, arg, units):
         if action == "new":
-            self.new_file(arg, units)
+            if not self.maybe_save():
+                return
+            self.set_project(new_project(units, arg or "slope"))
+            self.set_draw_mode("region")
+            self.draw_actions["region"].setChecked(True)
+            self.edit_analysis()
         elif action == "open":
             self.open_file()
-        elif action == "ai":
-            self.ai_builder()
-        elif action == "example":
-            self.open_example(arg)
         elif action == "recent":
             self.open_file(arg)
+        elif action == "example":
+            self.open_example(arg)
+        elif action == "ai":
+            self.ai_builder()
+        elif action == "guide":
+            self.quick_guide()
+        elif action in ("docs", "issues"):
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl("https://github.com/ArghoAdhikary/StrataLab" +
+                                          ("/issues" if action == "issues" else "#readme")))
 
     def quick_guide(self):
         TextDialog("Quick Guide", GUIDE, self).exec()
@@ -1448,6 +1506,7 @@ class MainWindow(QMainWindow):
         if not self.maybe_save():
             e.ignore()
             return
+        self.show_workspace()          # never remember the home page's hidden docks and toolbars
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())
         e.accept()
@@ -1484,7 +1543,7 @@ GUIDE = """StrataLab quick guide
    - Draw > Piezometric Line, Point Loads, Surcharge Loads, Reinforcement, Flux Sections as needed.
 
 2. Analyses and their parents
-   - Each analysis can have a parent (Analysis Settings > Parent). Children use their parents' results:
+   - Each analysis can have a parent (Define > Analyses > Parent). Children use their parents' results:
      seepage -> pore pressures for slope and stress, flow for transport, saturation for air flow;
      stress -> stresses for the finite element slope method and initial stresses for later stages;
      dynamic -> Newmark displacement of a slope; earlier seepage / thermal -> initial conditions.
