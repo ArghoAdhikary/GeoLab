@@ -75,7 +75,8 @@ directly with another vendor's software.
 | Materials dialog with tabs per physics; analysis settings per analysis type; boundary conditions limited to one analysis | `test_ui.py` |
 | Results: any field, any saved time, deformed mesh, yield zones, vectors, particle paths, point read-out, graphs vs time | `test_results_view_for_every_analysis_type` |
 | Files: `.slab`, JSON, CSV (every nodal field), PNG, PDF, printing; command-line batch solver | `test_io.py` |
-| GeoStudio `.gsz` open and export: geometry (points, lines, regions); material names, region assignments and common properties are read when present | real GeoStudio 2025.2 file imported; exported files opened and rewritten by GeoStudio's GeoCmd with all points, lines and regions kept; `test_gsz.py` |
+| GeoStudio `.gsz` open: geometry incl. interior lines (drains), materials (stress, hydraulic, compressibility) and region assignments, analyses (kind, method, parent, duration, steps), boundary conditions with the analyses that use them | two real GeoStudio 2025 files imported; imported consolidation solves; `test_gsz.py` |
+| GeoStudio `.gsz` export: geometry, materials, in situ and consolidation stress analyses, fixed / load / drainage boundaries; anything else is listed as not written | real project exported, passed through GeoStudio's GeoCmd and read back identical (regions, materials, analyses, boundaries) |
 | AI Slope Builder (Claude) | fake client only |
 | Windows and macOS builds | GitHub Actions |
 
@@ -91,6 +92,6 @@ directly with another vendor's software.
 | Consolidation with plasticity; Cam Clay / hyperbolic in the in situ stage | Consolidation is linear elastic; nonlinear models apply in load-deformation stages (in situ uses E and nu). |
 | Rapid drawdown by the Duncan-Wright-Wong method | Use transient seepage then slope stability. |
 | Unit conversion when switching unit systems | Switching relabels values. |
-| `.gsz`: materials, analyses, boundary conditions | Only geometry is exchanged so far; the rest needs a GeoStudio sample file that contains them. |
+| `.gsz`: slope (SLOPE/W), seepage, dynamic, thermal, transport and air analyses on export; results | Export writes stress (in situ, consolidation) analyses only; the file layout of the others has not been seen in a real file yet. Results are not read. |
 | Code signing / notarization | Builds are unsigned. |
 | Live Claude API call | Tested with a fake client only. The AI builder sets up slope models. |

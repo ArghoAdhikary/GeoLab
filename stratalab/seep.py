@@ -43,6 +43,15 @@ def generate_mesh(project, size: float):
                 x, y = x1 + t * (x2 - x1), y1 + t * (y2 - y1)
                 pts.setdefault(key(x, y), (x, y))
             segs.append((x1, y1, x2, y2))
+    for line in getattr(project, "mesh_lines", []) or []:     # interior lines: nodes along them
+        for (x1, y1), (x2, y2) in zip(line[:-1], line[1:]):
+            L = math.hypot(x2 - x1, y2 - y1)
+            k = max(1, int(math.ceil(L / size)))
+            for j in range(k + 1):
+                t = j / k
+                x, y = x1 + t * (x2 - x1), y1 + t * (y2 - y1)
+                pts.setdefault(key(x, y), (x, y))
+            segs.append((x1, y1, x2, y2))
     bnd = np.array(list(pts.values()))
     xs = [p[0] for r in regions for p in r.points]
     ys = [p[1] for r in regions for p in r.points]

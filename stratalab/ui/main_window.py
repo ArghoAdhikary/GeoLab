@@ -903,14 +903,17 @@ class MainWindow(QMainWindow):
             return
         try:
             from ..gsz import write_gsz
-            write_gsz(self.project, path)
+            skipped = write_gsz(self.project, path)
         except Exception as e:
             QMessageBox.critical(self, "Export failed", str(e))
             return
-        self.log_msg(f"Exported GeoStudio file: {path} (geometry: points, lines and regions)")
-        QMessageBox.information(self, APP_NAME, "Exported the geometry (points, lines and regions). Materials, "
-                                "analyses and boundary conditions are not written to .gsz files yet; "
-                                "define them in GeoStudio.")
+        self.log_msg(f"Exported GeoStudio file: {path}")
+        msg = ("Exported geometry, materials, in situ and consolidation stress analyses and their fixed, load "
+               "and drainage boundaries.")
+        if skipped:
+            msg += "\n\nNot written (set these up in GeoStudio):\n- " + "\n- ".join(skipped)
+            self.log_msg("Not written to .gsz: " + "; ".join(skipped))
+        QMessageBox.information(self, APP_NAME, msg)
 
     def export_json(self):
         path = self._ask_save("Export Project JSON", ".json", "JSON (*.json)")

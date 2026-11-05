@@ -447,6 +447,7 @@ class Project:
     sketch_texts: list[SketchText] = field(default_factory=list)
     reinforcements: list[Reinforcement] = field(default_factory=list)
     flux_sections: list[FluxSection] = field(default_factory=list)
+    mesh_lines: list = field(default_factory=list)     # interior lines the mesh follows (e.g. drains)
     grid_spacing: float = 1.0
 
     # -- lookups -------------------------------------------------------

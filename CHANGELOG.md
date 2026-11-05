@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.3.0 - 2026-11-05
+
+- `.gsz` import now reads materials (stress model, stiffness, unit weight, void ratio, conductivity,
+  anisotropy, compressibility), region assignments, analyses (kind, method, parent, duration, time
+  steps), boundary conditions with the analyses that use them, and interior lines such as drains.
+- `.gsz` export now writes materials, in situ and consolidation stress analyses, and fixed, load and
+  drainage boundaries; the export lists anything it could not write. A real project survives a full
+  round trip through GeoStudio's GeoCmd unchanged.
+- The mesh follows interior lines (drains, internal boundaries).
+
 ## 2.2.0 - 2026-11-05
 
 - Open GeoStudio `.gsz` files (File > Open) and export them (File > Export > GeoStudio Project). The

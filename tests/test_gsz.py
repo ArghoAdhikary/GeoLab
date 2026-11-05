@@ -80,3 +80,99 @@ def test_not_a_gsz(tmp_path):
     bad.write_text("hello")
     with pytest.raises(ValueError, match="not a GeoStudio"):
         read_gsz(bad)
+
+
+# structure of a solved GeoStudio 2025 consolidation project (analyses, boundary definitions, contexts)
+FULL = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<GSIData Version="11.12" AppVersion="25.2.1.39">
+  <FileInfo FileVersion="11.08" Title="Layer" Author="Tester" />
+  <Analyses Len="2">
+    <Analysis><ID>1</ID><Name>In Situ</Name><Kind>SIGMA/W</Kind><Method>Insitu2</Method><GeometryId>1</GeometryId>
+      <TimeIncrements><Duration Missing="true" /><TimeSteps Len="1"><TimeStep Save="true" /></TimeSteps></TimeIncrements>
+    </Analysis>
+    <Analysis><ID>2</ID><Name>Consolidation</Name><Kind>SIGMA/W</Kind><ParentID>1</ParentID>
+      <Method>Consolidation</Method><GeometryId>1</GeometryId>
+      <TimeIncrements><Duration>1e+08</Duration><IncrementCount>5</IncrementCount></TimeIncrements>
+    </Analysis>
+  </Analyses>
+  <BCs Len="4">
+    <BC ID="1" Name="Fixed X" XDisp="DispDisplacementX(Variability=Constant,Value=0)" YDisp="ForceDispUndefined()" />
+    <BC ID="3" Name="Fixed X/Y" XDisp="DispDisplacementX(Variability=Constant,Value=0)" YDisp="DispDisplacementY(Variability=Constant,Value=0)" />
+    <BC ID="5" Name="Drain" Hydraulic="HydPressureHead(Variability=Constant,Value=0)" />
+    <BC ID="9" Name="load" XDisp="DispNormTanX(VariabilityNorm=Constant,DispNorm=50,VariabilityTan=Constant,DispTan=0)" YDisp="DispNormTanY(VariabilityNorm=Constant,DispNorm=0,VariabilityTan=Constant,DispTan=0)" />
+  </BCs>
+  <Contexts Len="2">
+    <Context><AnalysisID>1</AnalysisID>
+      <GeometryUsesMaterials Len="1"><GeometryUsesMaterial ID="Regions-1" Entry="1" /></GeometryUsesMaterials>
+      <GeometryUsesXDispBCs Len="3"><GeometryUsesXDispBC ID="Lines-2" Entry="1" /><GeometryUsesXDispBC ID="Lines-4" Entry="1" />
+        <GeometryUsesXDispBC ID="Lines-1" Entry="3" /></GeometryUsesXDispBCs>
+    </Context>
+    <Context><AnalysisID>2</AnalysisID>
+      <GeometryUsesMaterials Len="1"><GeometryUsesMaterial ID="Regions-1" Entry="1" /></GeometryUsesMaterials>
+      <GeometryUsesHydraulicBCs Len="3"><GeometryUsesHydraulicBC ID="Lines-3" Entry="5" />
+        <GeometryUsesHydraulicBC ID="Lines-6" Entry="5" /><GeometryUsesHydraulicBC ID="Lines-5" Entry="5" /></GeometryUsesHydraulicBCs>
+      <GeometryUsesXDispBCs Len="5"><GeometryUsesXDispBC ID="Lines-2" Entry="1" /><GeometryUsesXDispBC ID="Lines-4" Entry="1" />
+        <GeometryUsesXDispBC ID="Lines-1" Entry="3" /><GeometryUsesXDispBC ID="Lines-3" Entry="9" />
+        <GeometryUsesXDispBC ID="Lines-6" Entry="9" /></GeometryUsesXDispBCs>
+    </Context>
+  </Contexts>
+  <Coordinates><EngCoords UnitSystem="Metric" /></Coordinates>
+  <Geometries Len="1"><Geometry><Name>2D Geometry</Name>
+    <Points Len="6"><Point ID="1" X="0" Y="0" /><Point ID="2" X="20" Y="0" /><Point ID="3" X="20" Y="5" />
+      <Point ID="4" X="0" Y="5" /><Point ID="5" X="10" Y="5" /><Point ID="6" X="10" Y="1" /></Points>
+    <Lines Len="6">
+      <Line><ID>1</ID><PointID1>1</PointID1><PointID2>2</PointID2></Line>
+      <Line><ID>2</ID><PointID1>2</PointID1><PointID2>3</PointID2></Line>
+      <Line><ID>3</ID><PointID1>3</PointID1><PointID2>5</PointID2></Line>
+      <Line><ID>6</ID><PointID1>5</PointID1><PointID2>4</PointID2></Line>
+      <Line><ID>4</ID><PointID1>4</PointID1><PointID2>1</PointID2></Line>
+      <Line><ID>5</ID><PointID1>5</PointID1><PointID2>6</PointID2><Pinned>true</Pinned><IsMeshed>true</IsMeshed></Line>
+    </Lines>
+    <Regions Len="1"><Region><ID>1</ID><PointIDs>1,2,3,5,4</PointIDs></Region></Regions>
+  </Geometry></Geometries>
+  <Materials Len="1"><Material><ID>1</ID><Color>RGB=(255,255,128)</Color><Name>clay</Name><SeepModel>SatOnly</SeepModel>
+    <SlopeModel>None</SlopeModel><StressModel>LinearElastic</StressModel>
+    <StressStrain><UnitWeight>18</UnitWeight><YoungsPrimeModulus>8000</YoungsPrimeModulus>
+      <EffectivePoissonsRatio>0.3</EffectivePoissonsRatio><OCRatio Missing="true" /><InitVoidRatio>0.9</InitVoidRatio></StressStrain>
+    <Hydraulic KYXRatio="1" KSat="1e-08" Beta="6e-05" UseInitPWP="true" /></Material></Materials>
+</GSIData>"""
+
+
+def test_import_full_project(tmp_path):
+    p = read_gsz(make_gsz(tmp_path / "full.gsz", FULL))
+    assert (p.title, p.author) == ("Layer", "Tester")
+    m = p.materials[0]
+    assert (m.name, m.stress_model, m.hyd_model, m.unit_weight, m.E, m.nu, m.e0, m.k_sat, m.mv) == \
+        ("clay", "linear_elastic", "saturated", 18, 8000, 0.3, 0.9, 1e-8, 6e-5)
+    ins, con = p.analyses
+    assert (ins.kind, ins.stress_type, con.stress_type, con.parent_id, con.duration, con.n_steps) == \
+        ("stress", "insitu", "consolidation", ins.id, 1e8, 5)
+    assert p.mesh_lines == [[[10, 5], [10, 1]]]
+    by = {(b.type, tuple(map(tuple, b.points))): b for b in p.boundary_conditions}
+    for seg in (((20, 5), (10, 5)), ((10, 5), (0, 5))):
+        assert by[("pressure", seg)].value == 50 and by[("pressure", seg)].analyses == [con.id]
+    assert by[("fixed_xy", ((0, 0), (20, 0)))].analyses == []                       # used by both analyses
+    assert by[("pressure_head", ((10, 5), (10, 1)))].analyses == [con.id]           # interior drain
+    from stratalab.solver import verify
+    assert verify(p, con) == []
+
+
+def test_full_project_export_round_trip(tmp_path):
+    p = read_gsz(make_gsz(tmp_path / "full.gsz", FULL))
+    out = tmp_path / "again.gsz"
+    assert write_gsz(p, out) == []
+    q = read_gsz(out)
+    key = lambda pr: sorted((b.type, b.value, tuple(map(tuple, b.points)), tuple(pr.analysis(i).name for i in b.analyses))
+                            for b in pr.boundary_conditions)
+    assert key(q) == key(p)
+    assert [(a.name, a.stress_type) for a in q.analyses] == [(a.name, a.stress_type) for a in p.analyses]
+    assert q.mesh_lines == p.mesh_lines
+
+
+def test_imported_consolidation_solves(tmp_path):
+    p = read_gsz(make_gsz(tmp_path / "full.gsz", FULL))
+    from stratalab.solver import solve
+    for a in p.analyses:
+        a.mesh_size = 0.5
+    r = solve(p, p.analyses[1])
+    assert r["settlement_history"][-1] > r["settlement_history"][0] > 0
