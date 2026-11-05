@@ -14,7 +14,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, Q
 from ..geometry import GroundProfile, bounds, polygon_area
 
 BC_COLORS = {"head": "#1f5fd1", "pressure_head": "#14a3b8", "flux": "#2e9d3a", "seepage_face": "#e07b00",
-             "nodal_flux": "#2e9d3a", "infiltration": "#2aa198", "free_drainage": "#6c71c4",
+             "nodal_flux": "#2e9d3a", "infiltration": "#2aa198", "free_drainage": "#6c71c4", "climate": "#0a8f3c",
              "fixed_x": "#555555", "fixed_y": "#555555", "fixed_xy": "#222222", "pressure": "#b0306a",
              "shear": "#b0306a", "force_x": "#b0306a", "force_y": "#b0306a", "displacement_y": "#d33682",
              "temperature": "#d1401f", "heat_flux": "#e07b00", "convective": "#cb4b16",

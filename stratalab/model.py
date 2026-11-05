@@ -78,6 +78,8 @@ HYDRAULIC_MODELS = {
 STRESS_MODELS = {
     "linear_elastic": "Linear elastic",
     "elastic_plastic": "Elastic-plastic (Mohr-Coulomb)",
+    "cam_clay": "Modified Cam Clay (critical state)",
+    "hyperbolic": "Hyperbolic (Duncan-Chang)",
     "none": "None (excluded)",
 }
 
@@ -91,6 +93,7 @@ BC_KINDS = {
         "seepage_face": "Potential seepage face",
         "infiltration": "Infiltration with ponding review",
         "free_drainage": "Free drainage (unit gradient)",
+        "climate": "Climate: rainfall (value) and potential evaporation (second value)",
     },
     "stress": {
         "fixed_x": "Fixed x",
@@ -194,6 +197,13 @@ class Material:
     nu: float = 0.3
     psi: float = 0.0              # dilation angle
     k0: float = 0.0               # 0 = nu / (1 - nu)
+    cc_lambda: float = 0.20       # Modified Cam Clay: slope of the normal compression line (e vs ln p')
+    cc_kappa: float = 0.04        # slope of the unload-reload line
+    e0: float = 1.0               # initial void ratio
+    dc_K: float = 300.0           # Duncan-Chang modulus number
+    dc_Kur: float = 600.0         # unload-reload modulus number
+    dc_n: float = 0.5             # modulus exponent
+    dc_Rf: float = 0.9            # failure ratio
     # -- dynamic --
     damping: float = 0.05
     gamma_ref: float = 0.0        # reference shear strain for equivalent linear (0 = linear)
@@ -257,17 +267,26 @@ class BoundaryCondition:
     value2: float = 0.0                              # second parameter (e.g. convective ambient temperature)
     fn: list = field(default_factory=list)           # [[time, value], ...] overrides value when given
     analyses: list = field(default_factory=list)     # analysis ids it applies to; empty = all
+    fn2: list = field(default_factory=list)          # [[time, value2], ...] (e.g. potential evaporation)
+    humidity: float = 0.5                            # climate: relative humidity of the air (0-1)
 
     @property
     def kind(self) -> str:
         return BC_KIND_OF.get(self.type, "hydraulic")
 
-    def at(self, t: float | None) -> float:
-        if t is None or not self.fn:
-            return self.value
+    @staticmethod
+    def _interp(fn, t, default):
+        if t is None or not fn:
+            return default
         import numpy as np
-        f = sorted(self.fn)
+        f = sorted(fn)
         return float(np.interp(t, [p[0] for p in f], [p[1] for p in f]))
+
+    def at(self, t: float | None) -> float:
+        return self._interp(self.fn, t, self.value)
+
+    def at2(self, t: float | None) -> float:
+        return self._interp(self.fn2, t, self.value2)
 
     @classmethod
     def from_dict(cls, d: dict) -> "BoundaryCondition":

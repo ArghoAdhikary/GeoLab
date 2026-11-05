@@ -6,9 +6,10 @@
   Corps of Engineers, Lowe-Karafiath, Sarma, ...) plus the finite element stress method; 10 strength
   models; reinforcement, tension cracks, ponded water; six slip surface searches and optimization;
   probability, sensitivity and Newmark earthquake displacement.
-- **Seepage**: steady and transient, saturated / unsaturated flow with a free phreatic surface.
-- **Stress-deformation**: in situ stresses, load-deformation with Mohr-Coulomb plasticity, strength
-  reduction factor of safety and coupled consolidation.
+- **Seepage**: steady and transient, saturated / unsaturated flow with a free phreatic surface, and a
+  climate boundary (rainfall, evaporation, ponding and runoff).
+- **Stress-deformation**: in situ stresses, load-deformation with Mohr-Coulomb, Modified Cam Clay or
+  hyperbolic (Duncan-Chang) soil, strength reduction factor of safety and coupled consolidation.
 - **Dynamic**: earthquake response with equivalent linear soil behaviour.
 - **Thermal** (with freezing and thawing), **contaminant transport** (with particle tracking) and **air flow**.
 - Analyses are linked: seepage feeds slope stability, stress and transport; stresses feed the finite

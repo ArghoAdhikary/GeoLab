@@ -127,6 +127,18 @@ def relative_k(m, hp, unsaturated=True):
     return np.where(hp >= 0, 1.0, np.maximum(kr, KR_MIN))
 
 
+KELVIN = 9.81 * 0.018016 / (8.314 * 293.15)     # g Mw / (R T): per metre of pressure head
+
+
+def evaporation_ratio(hp, air_humidity=0.5):
+    """Actual / potential evaporation from the surface pressure head (Wilson, Fredlund & Barbour 1994):
+    the soil surface relative humidity follows Kelvin's law, hr = exp(hp g Mw / R T), and
+    AE / PE = (hr - ha) / (1 - ha). Wet soil evaporates at the potential rate."""
+    hr = np.exp(KELVIN * np.minimum(np.asarray(hp, float), 0.0))
+    ha = min(max(air_humidity, 0.0), 0.99)
+    return np.clip((hr - ha) / (1.0 - ha), 0.0, 1.0)
+
+
 # ---------------------------------------------------------------------------
 # Solver
 # ---------------------------------------------------------------------------
@@ -166,7 +178,7 @@ class _SeepProblem(DiffusionProblem):
             self.bcs.append((bc, nodes, edges, edge_mat))
             if bc.type in ("seepage_face", "head"):
                 self.review_nodes.update(nodes)
-            elif bc.type == "infiltration":
+            elif bc.type in ("infiltration", "climate"):
                 self.infil_nodes.update(nodes)
         if not any(bc.type in ("head", "pressure_head") for bc, *_ in self.bcs) and not self.review_nodes:
             raise ValueError("At least one head or pressure-head boundary condition is required.")
@@ -212,9 +224,19 @@ class _SeepProblem(DiffusionProblem):
                 q = [-m.k_sat * float(relative_k(m, np.array([0.5 * (h[a] - self.y[a] + h[b] - self.y[b])]),
                                                  self.a.unsaturated)[0]) for (a, b), m in zip(edges, edge_mat)]
                 flux += self.m.edge_load(edges, q)
+            elif bc.type == "climate":
+                rain, evap = self.climate_rates(bc, edges, t, h)
+                flux += self.m.edge_load(edges, rain - evap)
         for i in self.active:
             fixed.setdefault(i, self.y[i])
         return fixed, flux, None
+
+    def climate_rates(self, bc, edges, t, h):
+        """Rainfall and actual evaporation (per unit area) on each edge of a climate boundary."""
+        rain = max(bc.at(t), 0.0)
+        pe = max(bc.at2(t), 0.0)
+        hp = np.array([0.5 * (h[a] - self.y[a] + h[b] - self.y[b]) for a, b in edges])
+        return np.full(len(edges), rain), pe * evaporation_ratio(hp, bc.humidity)
 
     def review(self, h, react, fixed, flux):
         changed = False
@@ -262,12 +284,23 @@ def run_seepage(project, analysis, progress=None, cancel=None, parent_results=No
     S0 = prob.storage(h0)[0]
     net_in = [0.0, 0.0]          # cumulative inflow, previous time
 
+    climate = {"rainfall": 0.0, "evaporation": 0.0, "runoff": 0.0}
+
     def on_step(k, t, h, react):
         if t is None:
             return
         _, flux, _ = prob.boundary(t, h)
-        net_in[0] += (t - net_in[1]) * float(react.sum() + flux.sum())
+        dt = t - net_in[1]
+        net_in[0] += dt * float(react.sum() + flux.sum())
         net_in[1] = t
+        for bc, nodes, edges, _m in prob.bcs:
+            if bc.type != "climate":
+                continue
+            L = np.array([np.hypot(*(mesh.nodes[b] - mesh.nodes[a])) for a, b in edges])
+            rain, evap = prob.climate_rates(bc, edges, t, h)
+            climate["rainfall"] += dt * float(np.sum(rain * L))
+            climate["evaporation"] += dt * float(np.sum(evap * L))
+            climate["runoff"] += dt * float(sum(-react[i] for i in nodes if i in prob.active and react[i] < 0))
         saved_t.append(float(t))
         saved_h.append(h.tolist())
         if progress:
@@ -303,6 +336,8 @@ def run_seepage(project, analysis, progress=None, cancel=None, parent_results=No
         dV = float(np.sum(mesh.lump * (th - S0)))
         res.update(times=saved_t, head_history=saved_h, storage_change=dV, net_inflow=net_in[0],
                    balance_error=abs(dV - net_in[0]) / max(abs(dV), abs(net_in[0]), 1e-30))
+        if any(bc.type == "climate" for bc, *_ in prob.bcs):
+            res["climate"] = climate
     return res
 
 

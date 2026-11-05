@@ -324,6 +324,14 @@ def run_stress(project, analysis, progress=None, cancel=None, parent=None, seep_
     u = np.zeros(2 * mesh.nn)
     history = []
     ok = True
+    from .soilmodels import NONLINEAR_MODELS, Constitutive, solve_nonlinear
+    mats_ = {m.id: m for m in project.materials}
+    if analysis.stress_type == "load" and any(mats_[i].stress_model in NONLINEAR_MODELS for i in set(mesh.mats.tolist())):
+        # Cam Clay / hyperbolic: modified Newton with sub-stepped stress integration
+        cons = Constitutive(project, mesh, model, sig)
+        u, sig, history, ok = solve_nonlinear(mesh, model, cons, fixed, F_total, uc_total, steps, u_gp,
+                                              max_iter=max(60, analysis.max_iter), progress=progress, cancel=cancel)
+        steps = 0
     for k in range(steps):
         if cancel and cancel():
             raise RuntimeError("Cancelled")

@@ -71,7 +71,8 @@ class MainWindow(QMainWindow):
                      "time_index": None, "yield": True}
         self.probe = None          # last clicked point in the results view
         self.current_material_id = self.project.materials[0].id
-        self.bc_params = {"name": "Head", "type": "head", "value": 10.0, "value2": 0.0, "fn": [], "analyses": []}
+        self.bc_params = {"name": "Head", "type": "head", "value": 10.0, "value2": 0.0, "fn": [], "analyses": [],
+                          "fn2": [], "humidity": 0.5}
         self.reinf_template = None
         self.point_load = (100.0, 0.0)
         self.surcharge_q = 10.0
@@ -577,6 +578,10 @@ class MainWindow(QMainWindow):
                 h.append(f"Flux section {name}: {q:.4e} {u('flux')}<br>")
             if "balance_error" in r:
                 h.append(f"Water balance error: {100 * r['balance_error']:.3f} %<br>")
+            cl = r.get("climate")
+            if cl:
+                h.append(f"Rainfall {cl['rainfall']:.4g}, evaporation {cl['evaporation']:.4g}, runoff "
+                         f"{cl['runoff']:.4g} {u('length')}³ per unit width<br>")
         elif t == "stress":
             if r.get("srm_fos"):
                 h.append(f"<span style='font-size:14pt'><b>Strength reduction F = {r['srm_fos']:.3f}</b></span><br>")
@@ -698,7 +703,8 @@ class MainWindow(QMainWindow):
             if group and bp["type"] not in BC_KINDS[group]:
                 bp["type"] = next(iter(BC_KINDS[group]))
             d = BCDialog(bp["name"], bp["type"], bp["value"], parent=self, kinds=[group] if group else None,
-                         value2=bp["value2"], fn=bp["fn"], analyses=bp["analyses"], project=self.project)
+                         value2=bp["value2"], fn=bp["fn"], analyses=bp["analyses"], project=self.project,
+                         fn2=bp["fn2"], humidity=bp["humidity"])
             if not d.exec():
                 self.draw_actions["select"].setChecked(True)
                 mode = "select"

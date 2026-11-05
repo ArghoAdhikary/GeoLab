@@ -283,7 +283,13 @@ MATERIAL_TABS = [
     ("Stress", [
         ("stress_model", "Stress-strain model", "choice", STRESS_MODELS),
         ("E", "Young's modulus E'", "float", "modulus"), ("nu", "Poisson's ratio", "float"),
-        ("psi", "Dilation angle (deg)", "float"), ("k0", "K0 (0 = nu / (1 - nu))", "float")]),
+        ("psi", "Dilation angle (deg)", "float"), ("k0", "K0 (0 = nu / (1 - nu))", "float"),
+        ("cc_lambda", "Cam Clay: lambda (NCL slope, e vs ln p')", "float"),
+        ("cc_kappa", "Cam Clay: kappa (unload-reload slope)", "float"),
+        ("e0", "Cam Clay: initial void ratio", "float"),
+        ("ocr", "Cam Clay / SHANSEP: overconsolidation ratio", "float"),
+        ("dc_K", "Hyperbolic: modulus number K", "float"), ("dc_Kur", "Hyperbolic: unload-reload number Kur", "float"),
+        ("dc_n", "Hyperbolic: modulus exponent n", "float"), ("dc_Rf", "Hyperbolic: failure ratio Rf", "float")]),
     ("Dynamic", [
         ("damping", "Damping ratio (small strain)", "float"),
         ("gamma_ref", "Reference shear strain (0 = linear)", "float"), ("damping_max", "Maximum damping ratio", "float")]),
@@ -319,6 +325,10 @@ def validate_material(m: Material):
         raise ValueError(f"{m.name}: Hoek-Brown needs UCS > 0, mi > 0 and 0 <= D <= 1.")
     if m.model == "shear_normal" and len(m.sn_table) < 2:
         raise ValueError(f"{m.name}: a shear / normal function needs at least two points.")
+    if m.stress_model == "cam_clay" and not (0 < m.cc_kappa < m.cc_lambda and m.e0 > 0 and m.ocr >= 1):
+        raise ValueError(f"{m.name}: Cam Clay needs 0 < kappa < lambda, e0 > 0 and OCR >= 1.")
+    if m.stress_model == "hyperbolic" and (m.dc_K <= 0 or m.dc_Kur <= 0 or not 0 < m.dc_Rf <= 1):
+        raise ValueError(f"{m.name}: hyperbolic model needs K > 0, Kur > 0 and 0 < Rf <= 1.")
     if min(m.th_k, m.th_k_frozen, m.th_c, m.th_c_frozen) <= 0:
         raise ValueError(f"{m.name}: thermal conductivities and heat capacities must be positive.")
 
@@ -739,7 +749,9 @@ class AnalysisDialog(QDialog):
 # Small editors
 # ---------------------------------------------------------------------------
 BC_HELP = {
-    "hydraulic": "Head / pressure head in length units; unit flux per unit length per second (inflow +).",
+    "hydraulic": "Head / pressure head in length units; unit flux per unit length per second (inflow +). "
+                 "Climate: value = rainfall rate, second value = potential evaporation rate (length per second; "
+                 "1 mm/day = 1.157e-8 m/s), plus air humidity; excess rain ponds and runs off.",
     "stress": "Pressure and shear in pressure units (compression +); forces are totals shared by the nodes; "
               "displacement in length units.",
     "thermal": "Temperature; heat flux per unit area (into the ground +); convective: value = h, second "
@@ -751,7 +763,7 @@ BC_HELP = {
 
 class BCDialog(QDialog):
     def __init__(self, name="BC", type_="head", value=0.0, parent=None, kinds=None, value2=0.0, fn=None,
-                 analyses=None, project=None):
+                 analyses=None, project=None, fn2=None, humidity=0.5):
         super().__init__(parent)
         self.setWindowTitle("Boundary Condition")
         f = QFormLayout(self)
@@ -764,6 +776,10 @@ class BCDialog(QDialog):
         self.fn = QPlainTextEdit("\n".join(f"{t:g}, {v:g}" for t, v in (fn or [])))
         self.fn.setMaximumHeight(80)
         self.fn.setPlaceholderText("time (s), value  per line - leave empty for a constant value")
+        self.fn2 = QPlainTextEdit("\n".join(f"{t:g}, {v:g}" for t, v in (fn2 or [])))
+        self.fn2.setMaximumHeight(70)
+        self.fn2.setPlaceholderText("time (s), second value  per line (e.g. potential evaporation)")
+        self.humidity = dspin(humidity, 0, 0.99, 2, 0.05)
         self.only = QComboBox()
         self.only.addItem("All analyses", None)
         for a in (project.analyses if project else []):
@@ -775,6 +791,8 @@ class BCDialog(QDialog):
         f.addRow("Value", self.value)
         f.addRow("Second value", self.value2)
         f.addRow("Value vs time", self.fn)
+        f.addRow("Second value vs time", self.fn2)
+        f.addRow("Air humidity (climate)", self.humidity)
         f.addRow("Applies to", self.only)
         self.help = QLabel()
         self.help.setWordWrap(True)
@@ -793,6 +811,7 @@ class BCDialog(QDialog):
     def try_accept(self):
         try:
             self.fn_rows = [r for r in AnalysisDialog._parse_rows(self.fn.toPlainText(), 2) if r]
+            self.fn2_rows = [r for r in AnalysisDialog._parse_rows(self.fn2.toPlainText(), 2) if r]
         except ValueError as e:
             QMessageBox.warning(self, "Invalid input", str(e))
             return
@@ -801,7 +820,8 @@ class BCDialog(QDialog):
     def params(self):
         only = self.only.currentData()
         return dict(name=self.name.text().strip() or "BC", type=self.type.currentData(), value=self.value.value(),
-                    value2=self.value2.value(), fn=getattr(self, "fn_rows", []), analyses=[only] if only else [])
+                    value2=self.value2.value(), fn=getattr(self, "fn_rows", []), analyses=[only] if only else [],
+                    fn2=getattr(self, "fn2_rows", []), humidity=self.humidity.value())
 
 
 class ReinforcementDialog(QDialog):

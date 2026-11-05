@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0 - 2026-11-05
+
+- Climate boundary for seepage: rainfall and potential evaporation that vary with time; actual
+  evaporation falls as the surface dries (Kelvin's law, Wilson-Fredlund-Barbour); rain that cannot
+  infiltrate ponds and runs off. Results report rainfall, evaporation and runoff totals.
+- Advanced soil models for load-deformation analyses: Modified Cam Clay (critical state) and
+  Duncan-Chang hyperbolic, solved with Newton iterations and sub-stepped stress integration.
+- Two new examples: rainfall and evaporation on a slope; soft clay under a fill (Cam Clay).
+
 ## 2.0.0 - 2026-11-02
 
 - New analysis types: stress-deformation (in situ, load-deformation, Mohr-Coulomb plasticity,

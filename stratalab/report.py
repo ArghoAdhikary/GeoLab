@@ -170,6 +170,10 @@ def build_report(project, analysis) -> str:
             L.append(f"Seepage face:      {len(r['seepage_face_nodes'])} nodes")
         if "balance_error" in r:
             L.append(f"Balance error:     {100 * r['balance_error']:.4f} % (storage change vs boundary flow)")
+        if r.get("climate"):
+            cl = r["climate"]
+            L.append(f"Climate:           rainfall {cl['rainfall']:.4g}, actual evaporation {cl['evaporation']:.4g}, "
+                     f"runoff {cl['runoff']:.4g} {u('length')}3 per unit width")
         if t == "stress":
             if r.get("srm_fos"):
                 L.append(f"Strength reduction factor of safety: {r['srm_fos']:.3f}")

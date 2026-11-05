@@ -33,6 +33,7 @@ directly with another vendor's software.
 | Head boundaries above the water level become seepage faces (drawdown) | drawdown example |
 | Flux sections | matches boundary flow (0.1 %) |
 | Automatic time-step cutting when a step does not converge | infiltration into dry soil |
+| Climate boundary: rainfall and potential evaporation vs time, actual evaporation from surface suction (Kelvin / Wilson-Fredlund-Barbour), ponding and runoff | wet soil evaporates at the potential rate (1 %), dry soil less; rain = runoff + infiltration; water balance < 2 % (`test_climate.py`) |
 
 ### Stress-deformation (6-node triangles, plane strain)
 
@@ -43,6 +44,9 @@ directly with another vendor's software.
 | Elastic-perfectly plastic Mohr-Coulomb (non-associated), viscoplastic algorithm | Prandtl strip footing 5.10 su vs 5.14 su exact |
 | Strength reduction factor of safety | Griffiths & Lane slope 1.36 (published ~1.4) |
 | Coupled Biot consolidation | Terzaghi excess pore pressure and degree of consolidation (2-3 %) |
+| Modified Cam Clay (critical state) with pressure-dependent stiffness and hardening | isotropic compression on the NCL, unloading on the URL, undrained shear to q = M p' and p' = p0 2^-(lambda-kappa)/lambda (2 %); FE column = element test (2 %) |
+| Duncan-Chang hyperbolic (E-nu) with unload-reload modulus | drained triaxial curve equals the hyperbola (1 %) |
+| Nonlinear solver: Newton iterations with the elastoplastic tangent, sub-stepped stress integration | `test_soilmodels.py` |
 
 ### Dynamic (earthquake)
 
@@ -79,11 +83,11 @@ directly with another vendor's software.
 | Feature | Notes |
 |---|---|
 | 3D geometry and 3D analyses | 2D only. |
-| Climate / evaporation boundaries, density-dependent flow, freezing-induced water migration | |
-| Advanced soil models (Cam Clay, hardening soil, hysteretic cyclic models, liquefaction, pore pressure generation in dynamic analysis) | Mohr-Coulomb and equivalent linear only. |
+| Vegetation / transpiration, snow, density-dependent flow, freezing-induced water migration | Climate covers rainfall, evaporation, ponding and runoff. |
+| Hardening Soil, hysteretic cyclic models, liquefaction / pore pressure generation in dynamic analysis | Static models: linear, Mohr-Coulomb, Modified Cam Clay, hyperbolic. |
 | Structural elements in stress analysis (beams, anchors, geogrids) | Reinforcement exists in slope stability only. |
 | Staged construction (adding / removing regions between stages) | Stages share one geometry. |
-| Consolidation with plasticity | Consolidation is linear elastic. |
+| Consolidation with plasticity; Cam Clay / hyperbolic in the in situ stage | Consolidation is linear elastic; nonlinear models apply in load-deformation stages (in situ uses E and nu). |
 | Rapid drawdown by the Duncan-Wright-Wong method | Use transient seepage then slope stability. |
 | Unit conversion when switching unit systems | Switching relabels values. |
 | `.gsz` import/export | Not supported: another vendor's proprietary format. |

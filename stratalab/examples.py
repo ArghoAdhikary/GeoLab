@@ -220,6 +220,47 @@ def air_flow() -> Project:
     return p
 
 
+def rainfall_slope() -> Project:
+    """Wet season then dry spell on a silty slope: climate boundary, transient seepage, stability."""
+    p = new_project(kind="seepage")
+    p.title = "Rainfall and evaporation on a slope"
+    m = p.materials[0]
+    m.name, m.cohesion, m.phi, m.phi_b, m.unit_weight = "Silty soil", 4.0, 30.0, 15.0, 19.0
+    m.hyd_model, m.k_sat, m.theta_s, m.theta_r, m.vg_alpha, m.vg_n, m.mv =         "van_genuchten", 2e-6, 0.42, 0.08, 1.0, 1.7, 1e-5
+    p.add_region([(0, 0), (60, 0), (60, 16), (40, 16), (20, 6), (0, 6)], m.id)
+    p.piezometric_line = [[0, 4], [20, 4], [40, 8], [60, 9]]
+    day, mm = 86400.0, 1.157e-8
+    p.add_bc("Weather", "climate", 0.0, [(0, 6), (20, 6), (40, 16), (60, 16)],
+             fn=[[0, 25 * mm], [20 * day, 25 * mm], [20.01 * day, 0.0], [40 * day, 0.0]],
+             value2=4 * mm, humidity=0.6)
+    p.add_bc("Groundwater left", "head", 4.0, [(0, 0), (0, 4)])
+    p.add_bc("Groundwater right", "head", 9.0, [(60, 0), (60, 9)])
+    seep = p.analyses[0]
+    seep.name, seep.transient, seep.duration, seep.n_steps, seep.step_growth = "Wet season and dry spell", True,         40 * day, 40, 1.0
+    seep.initial, seep.mesh_size, seep.max_iter = "water_table", 1.0, 60
+    st = p.add_analysis("Stability after the season", kind="slope", parent_id=seep.id, pwp="seepage")
+    _auto_search(p, st)
+    return p
+
+
+def cam_clay_embankment() -> Project:
+    """A wide fill load on soft normally consolidated clay (Modified Cam Clay)."""
+    p = new_project(kind="stress")
+    p.title = "Soft clay under a fill (Modified Cam Clay)"
+    clay = p.materials[0]
+    clay.name, clay.stress_model, clay.unit_weight, clay.E, clay.nu, clay.phi =         "Soft clay", "cam_clay", 16.0, 3000.0, 0.3, 25.0
+    clay.cc_lambda, clay.cc_kappa, clay.e0, clay.ocr = 0.25, 0.05, 1.4, 1.2
+    p.add_region([(0, 0), (40, 0), (40, 8), (0, 8)], clay.id)
+    _box_supports(p, 0, 40, 8, 8)
+    ins = p.analyses[0]
+    ins.name, ins.stress_type, ins.mesh_size = "In situ", "insitu", 1.25
+    load = p.add_analysis("Fill load (40 kPa)", kind="stress", parent_id=ins.id, stress_type="load",
+                          load_steps=8, mesh_size=1.25)
+    p.add_bc("Fill", "pressure", 40.0, [(15, 8), (0, 8)], analyses=[load.id])
+    p.description = "Half model, symmetry on the left. Compare with the same model using linear elastic clay."
+    return p
+
+
 EXAMPLES = {
     "Homogeneous slope (benchmark)": homogeneous_slope,
     "Layered slope with water table": layered_slope_with_water,
@@ -232,4 +273,6 @@ EXAMPLES = {
     "Frost penetration (thermal)": frost_penetration,
     "Contaminant plume (transport)": contaminant_plume,
     "Soil vapour extraction (air flow)": air_flow,
+    "Rainfall and evaporation on a slope": rainfall_slope,
+    "Soft clay under a fill (Cam Clay)": cam_clay_embankment,
 }
