@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.5.0 - 2026-11-06
+
+- GeoStudio slope stability (SLOPE/W) projects open and solve: limit equilibrium method, piezometric
+  line and which materials use it, pore pressure source, entry and exit ranges with their increments,
+  direction of movement and seismic coefficients. Slope analyses, Mohr-Coulomb strength and these
+  settings are also written on export; GeoStudio's GeoCmd reads the exported file with nothing dropped.
+- Window layout reorganised: File, Edit, View, Define, Draw, Sketch, Modify, Window and Help menus;
+  Definition / Results / Page Layout buttons; drawing tools in a toolbar down the right side; status
+  bar with the cursor coordinate (type x, y to go there), grid and snap toggles, zoom and the drawing
+  scale. Solve Manager, Verify and Solve are under Window and on the toolbar.
+- Page Layout: print preview of the drawing and results pages.
+- Slope analysis settings in tabs: Settings (method, side function, pore pressures, seismic, unit
+  weight of water), Slip Surface (search and tension crack), Optimization, Distribution
+  (probabilistic and sensitivity) and Convergence (slices, minimum depth). Analysis Type chooses
+  Limit Equilibrium or Finite Element Stress-based.
+- Slip Surface Entry and Exit Range window (Draw menu, and after drawing the ranges): left and right
+  ranges with X, Y read from the ground, increments and radius increments; the higher range is the
+  entry.
+
 ## 2.4.0 - 2026-11-06
 
 - New home page inside the main window: **New** (choose units template, geometry dimension and the

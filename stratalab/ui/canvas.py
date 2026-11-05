@@ -202,6 +202,8 @@ class Canvas(QWidget):
                     s.exit_x1, s.exit_x2 = sorted((self.temp[2][0], self.temp[3][0]))
                     h.after_change("Set entry and exit")
                 self.temp = []
+                if hasattr(h, "entry_exit_dialog"):
+                    h.entry_exit_dialog()        # review the ranges and their increments
         elif self.mode == "grid":
             self.temp.append(w)
             if len(self.temp) == 2:

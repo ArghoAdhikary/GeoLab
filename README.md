@@ -15,8 +15,8 @@
 - Analyses are linked: seepage feeds slope stability, stress and transport; stresses feed the finite
   element slope method; earthquakes feed Newmark displacement.
 - **AI Slope Builder**: describe a slope in plain language and Claude sets up the model.
-- Opens GeoStudio `.gsz` files (geometry, materials, analyses, boundary conditions) and exports them
-  (geometry, materials, stress / consolidation analyses and their boundaries).
+- Opens GeoStudio `.gsz` files (geometry, materials, slope, stress and seepage analyses, piezometric line, slip surface entry and exit, boundary conditions) and exports them
+  (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, stress / consolidation analyses and their boundaries).
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
 
 See [FEATURES.md](FEATURES.md) for exactly what is and isn't implemented, and how each feature was tested.

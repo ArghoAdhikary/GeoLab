@@ -54,8 +54,11 @@ def test_draw_region_with_mouse_and_undo(win, app):
     assert len(win.project.regions) == 1
 
 
-def test_entry_exit_by_mouse_then_solve_and_export(win, app, tmp_path):
+def test_entry_exit_by_mouse_then_solve_and_export(win, app, tmp_path, monkeypatch):
     from stratalab.examples import homogeneous_slope
+    from stratalab.ui import main_window
+    shown = []
+    monkeypatch.setattr(main_window.EntryExitDialog, "exec", lambda self: shown.append(self) or 1)
     win.set_project(homogeneous_slope())
     c = win.canvas
     win.set_draw_mode("entry_exit")
@@ -63,6 +66,7 @@ def test_entry_exit_by_mouse_then_solve_and_export(win, app, tmp_path):
         click(c, x, win.project.analyses[0].search.min_depth)  # y does not matter; x is used
     s = win.project.analyses[0].search
     assert abs(s.entry_x1 - 36) < 0.6 and abs(s.exit_x2 - 24) < 0.6
+    assert len(shown) == 1 and "Entry" in shown[0].side["right"]["title"].text()
     solve_all(win.project)
     win.set_view("results")
     assert win.view_mode == "results"

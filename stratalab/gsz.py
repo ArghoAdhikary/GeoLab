@@ -211,6 +211,73 @@ def _bc_types(bc_el):
     return out
 
 
+def _xy(el):
+    if el is None:
+        return None
+    x, y = _num(el.attrib.get("X")), _num(el.attrib.get("Y"))
+    return None if x is None or y is None else (x, y)
+
+
+def _slope_items(root, p, an_map):
+    """Slope stability settings: piezometric line, pore pressure source and the slip surface search
+    (entry and exit ranges with their increments, direction of movement)."""
+    for sec in _children(root, "WaterItems"):
+        for item in _children(sec, "WaterItem"):
+            a = p.analysis(an_map.get(_text(item, "AnalysisID")))
+            opt = (_text(_find(item, "ResultInputInfo"), "Option") or "").lower() if _find(item, "ResultInputInfo") is not None else ""
+            if a is None:
+                continue
+            if "piezo" in opt:
+                a.pwp = "piezometric"
+            elif "parent" in opt or "analysis" in opt:
+                a.pwp = "seepage"
+    for sec in _children(root, "StabilityItems"):
+        for item in _children(sec, "StabilityItem"):
+            a = p.analysis(an_map.get(_text(item, "AnalysisID")))
+            entry = _find(item, "Entry")
+            if a is None or entry is None:
+                continue
+            data = {}
+            for dps in _children(entry, "DataPoints"):
+                for dp in _children(dps, "DataPoint"):
+                    xy = _xy(dp)
+                    if xy:
+                        data[dp.attrib.get("Number")] = list(xy)
+            surfaces = [ps for sec2 in _children(entry, "PiezometricSurfaces") for ps in _children(sec2, "PiezometricSurface")]
+            if surfaces and not p.piezometric_line:
+                refs = [d.text.strip() for d in _find(surfaces[0], "DataPoints") if d.text and d.text.strip()]
+                line = [data[r] for r in refs if r in data]
+                if len(line) >= 2:
+                    p.piezometric_line = sorted(line)
+            if a.kind != "slope":
+                continue
+            slip = _find(entry, "SlipSurface")
+            if slip is None:
+                continue
+            right_to_left = (_text(slip, "DirectionOfSlip") or "RightToLeft").lower() != "lefttoright"
+            ee = _find(slip, "EntryExit")
+            if ee is not None:
+                l1, l2 = _xy(_find(ee, "LeftSideLeftPt")), _xy(_find(ee, "LeftSideRightPt"))
+                r1, r2 = _xy(_find(ee, "RightSideLeftPt")), _xy(_find(ee, "RightSideRightPt"))
+                li, ri = _num(_text(ee, "LeftInc")), _num(_text(ee, "RightInc"))
+                if l1 and l2 and r1 and r2:
+                    left, right = sorted((l1[0], l2[0])), sorted((r1[0], r2[0]))
+                    entry_r, exit_r = (right, left) if right_to_left else (left, right)
+                    entry_i, exit_i = (ri, li) if right_to_left else (li, ri)
+                    st = a.search
+                    st.mode = "entry_exit"
+                    st.entry_x1, st.entry_x2 = entry_r
+                    st.exit_x1, st.exit_x2 = exit_r
+                    # GeoStudio counts increments (gaps); StrataLab counts points
+                    st.n_entry = int(entry_i or 8) + 1
+                    st.n_exit = int(exit_i or 8) + 1
+                    st.n_radius = int(_num(_text(ee, "RadiusInc")) or 4) + 1
+            seis = _find(entry, "Seismic")
+            if seis is not None:
+                a.kh = _num(seis.attrib.get("Horizontal")) or 0.0
+                a.kv = _num(seis.attrib.get("Vertical")) or 0.0
+
+
 def read_gsz(path) -> Project:
     """Read a GeoStudio .gsz project: geometry, materials and region assignments, analyses (with
     parents, durations and time steps) and boundary conditions (with the analyses that use them)."""
@@ -270,6 +337,8 @@ def read_gsz(path) -> Project:
             child, parent = p.analysis(aid), p.analysis(an_map[pid])
             if child.kind == "seepage" and parent.kind == "seepage":
                 child.initial = "parent"
+
+    _slope_items(root, p, an_map)
 
     # region materials: direct reference, or the analysis contexts (first one that assigns it)
     contexts = [c for sec in _children(root, "Contexts") for c in _children(sec, "Context")]
@@ -345,6 +414,9 @@ def read_gsz(path) -> Project:
 STRESS_MODEL_OUT = {"linear_elastic": "LinearElastic", "elastic_plastic": "ElasticPlastic", "none": "None"}
 SEEP_MODEL_OUT = {"saturated": "SatOnly"}
 METHOD_OUT = {"insitu": "Insitu2", "consolidation": "Consolidation"}
+SLOPE_MODEL_OUT = {"mohr_coulomb": "MohrCoulomb"}
+SLOPE_METHOD_OUT = {"ordinary": "Ordinary", "bishop": "Bishop", "janbu": "Janbu", "spencer": "Spencer",
+                    "morgenstern_price": "Morgenstern-Price"}
 
 
 def _bc_attrs(bc):
@@ -395,16 +467,20 @@ def _write_model(root, project, region_ids, lines, points):
         ET.SubElement(el, "Color").text = f"RGB=({r},{g},{b})"
         ET.SubElement(el, "Name").text = m.name
         ET.SubElement(el, "SeepModel").text = SEEP_MODEL_OUT.get(m.hyd_model, "SatOnly")
-        ET.SubElement(el, "SlopeModel").text = "None"
+        uses_slope = any(a.kind == "slope" for a in project.analyses)
+        ET.SubElement(el, "SlopeModel").text = SLOPE_MODEL_OUT.get(m.model, "MohrCoulomb") if uses_slope else "None"
+        if uses_slope and m.model not in SLOPE_MODEL_OUT:
+            skipped.append(f"material '{m.name}': strength model {m.model} written as Mohr-Coulomb")
         ET.SubElement(el, "StressModel").text = STRESS_MODEL_OUT.get(m.stress_model, "LinearElastic")
         ss = ET.SubElement(el, "StressStrain")
-        for tag, val in (("UnitWeight", m.unit_weight), ("YoungsPrimeModulus", m.E),
-                         ("EffectivePoissonsRatio", m.nu), ("InitVoidRatio", m.e0)):
+        for tag, val in (("UnitWeight", m.unit_weight), ("CohesionPrime", m.cohesion), ("PhiPrime", m.phi),
+                         ("YoungsPrimeModulus", m.E), ("EffectivePoissonsRatio", m.nu), ("InitVoidRatio", m.e0)):
             ET.SubElement(ss, tag).text = f"{val:.12g}"
         ET.SubElement(el, "Hydraulic", KYXRatio=f"{m.k_ratio:.12g}", KSat=f"{m.k_sat:.12g}", Beta=f"{m.mv:.12g}")
         if m.stress_model not in STRESS_MODEL_OUT:
             skipped.append(f"material '{m.name}': stress model {m.stress_model} written as linear elastic")
-    exported = [a for a in project.analyses if a.kind == "stress" and a.stress_type in METHOD_OUT]
+    exported = [a for a in project.analyses if (a.kind == "stress" and a.stress_type in METHOD_OUT)
+                or (a.kind == "slope" and a.method in SLOPE_METHOD_OUT)]
     skipped += [f"analysis '{a.name}' ({a.kind})" for a in project.analyses if a not in exported]
     ans = ET.SubElement(root, "Analyses", Len=str(len(exported)))
     ids = {a.id for a in exported}
@@ -412,13 +488,19 @@ def _write_model(root, project, region_ids, lines, points):
         el = ET.SubElement(ans, "Analysis")
         ET.SubElement(el, "ID").text = str(a.id)
         ET.SubElement(el, "Name").text = a.name
-        ET.SubElement(el, "Kind").text = "SIGMA/W"
+        ET.SubElement(el, "Kind").text = "SLOPE/W" if a.kind == "slope" else "SIGMA/W"
         if a.parent_id in ids:
             ET.SubElement(el, "ParentID").text = str(a.parent_id)
-        ET.SubElement(el, "Method").text = METHOD_OUT[a.stress_type]
+        ET.SubElement(el, "Method").text = (SLOPE_METHOD_OUT[a.method] if a.kind == "slope"
+                                            else METHOD_OUT[a.stress_type])
         ET.SubElement(el, "GeometryId").text = "1"
         ti = ET.SubElement(el, "TimeIncrements")
-        if a.stress_type == "consolidation":
+        if a.kind == "slope":
+            ET.SubElement(ti, "Duration", Missing="true")
+            ts = ET.SubElement(ti, "TimeSteps", Len="1")
+            ET.SubElement(ts, "TimeStep", Save="true")
+            ET.SubElement(el, "ComputedPhysics", SlopeStability="true")
+        elif a.stress_type == "consolidation":
             ET.SubElement(ti, "Duration").text = f"{a.duration:.12g}"
             ET.SubElement(ti, "IncrementCount").text = str(a.n_steps)
             ts = ET.SubElement(ti, "TimeSteps", Len=str(a.n_steps))
@@ -448,7 +530,7 @@ def _write_model(root, project, region_ids, lines, points):
             skipped.append(f"boundary '{bc.name}' (not on a geometry line)")
             continue
         defs.append((bc, attrs))
-        aids = [aid for aid in (bc.analyses or [a.id for a in exported]) if aid in ids]
+        aids = [aid for aid in (bc.analyses or [a.id for a in exported if a.kind == "stress"]) if aid in ids]
         uses.append((len(defs), "Hydraulic" in attrs, on, aids))
     bcs = ET.SubElement(root, "BCs", Len=str(len(defs)))
     for i, (bc, attrs) in enumerate(defs, 1):
@@ -466,12 +548,68 @@ def _write_model(root, project, region_ids, lines, points):
             h = ET.SubElement(ctx, "GeometryUsesHydraulicBCs", Len=str(len(hyd)))
             for bid, lid in hyd:
                 ET.SubElement(h, "GeometryUsesHydraulicBC", ID=f"Lines-{lid}", Entry=str(bid))
-        for comp in ("X", "Y"):
+        for comp in (("X", "Y") if mech else ()):
             c = ET.SubElement(ctx, f"GeometryUses{comp}DispBCs", Len=str(len(mech)))
             for bid, lid in mech:
                 ET.SubElement(c, f"GeometryUses{comp}DispBC", ID=f"Lines-{lid}", Entry=str(bid))
         ET.SubElement(ctx, "IsDefined").text = "true"
+    _write_slope_items(root, project, [a for a in exported if a.kind == "slope"])
     return skipped
+
+
+def _write_slope_items(root, project, slopes):
+    """Piezometric line, pore pressure source and entry/exit slip surface search of slope analyses."""
+    if not slopes:
+        return
+    from .geometry import GroundProfile
+    gp = GroundProfile(project.regions, samples=800)
+    items = ET.SubElement(root, "StabilityItems", Len=str(len(slopes)))
+    water = ET.SubElement(root, "WaterItems", Len=str(len(slopes)))
+    piezo = project.piezometric_line if len(project.piezometric_line) >= 2 else []
+    for a in slopes:
+        it = ET.SubElement(items, "StabilityItem")
+        ET.SubElement(it, "AnalysisID").text = str(a.id)
+        entry = ET.SubElement(it, "Entry")
+        if piezo:
+            dps = ET.SubElement(entry, "DataPoints", Len=str(len(piezo)))
+            for i, (x, y) in enumerate(piezo, 1):
+                ET.SubElement(dps, "DataPoint", Number=str(i), X=_f(x), Y=_f(y))
+        slip = ET.SubElement(entry, "SlipSurface")
+        st = a.search
+        e = sorted((st.entry_x1, st.entry_x2))
+        x = sorted((st.exit_x1, st.exit_x2))
+        if st.mode in ("entry_exit", "auto") and e != x:
+            if st.mode == "auto" or e == [0.0, 0.0]:
+                from .geometry import auto_entry_exit
+                e, x = (sorted(r) for r in auto_entry_exit(project))
+            right_to_left = e[0] > x[0]
+            left, right = (x, e) if right_to_left else (e, x)
+            linc, rinc = (st.n_exit, st.n_entry) if right_to_left else (st.n_entry, st.n_exit)
+            ee = ET.SubElement(slip, "EntryExit")
+            for tag, xv in (("LeftSideLeftPt", left[0]), ("LeftSideRightPt", left[1])):
+                ET.SubElement(ee, tag, X=_f(xv), Y=_f(gp.ground(xv)))
+            ET.SubElement(ee, "LeftInc").text = str(max(1, linc - 1))
+            for tag, xv in (("RightSideLeftPt", right[0]), ("RightSideRightPt", right[1])):
+                ET.SubElement(ee, tag, X=_f(xv), Y=_f(gp.ground(xv)))
+            ET.SubElement(ee, "RightInc").text = str(max(1, rinc - 1))
+            ET.SubElement(slip, "DirectionOfSlip").text = "RightToLeft" if right_to_left else "LeftToRight"
+        if a.kh or a.kv:
+            ET.SubElement(entry, "Seismic", Horizontal=_f(a.kh), Vertical=_f(a.kv))
+        if piezo:
+            ps = ET.SubElement(ET.SubElement(entry, "PiezometricSurfaces", Len="1"), "PiezometricSurface")
+            ET.SubElement(ps, "ID").text = "1"
+            refs = ET.SubElement(ps, "DataPoints", Len=str(len(piezo)))
+            for i in range(1, len(piezo) + 1):
+                ET.SubElement(refs, "DataPoint").text = str(i)
+            uses = ET.SubElement(entry, "MaterialUsesPiezs", Len=str(len(project.materials)))
+            for m in project.materials:
+                ET.SubElement(uses, "MaterialUsesPiez", ID=str(m.id), UsesID="1")
+        w = ET.SubElement(water, "WaterItem")
+        ET.SubElement(w, "AnalysisID").text = str(a.id)
+        we = ET.SubElement(w, "Entry")
+        if a.pwp == "piezometric" and piezo:
+            ET.SubElement(ET.SubElement(we, "ResultInputInfo"), "Option").text = "PiezoSurface"
+        ET.SubElement(we, "UnitWaterWeight").text = _f(project.gamma_w)
 
 
 def write_gsz(project: Project, path):
@@ -550,7 +688,8 @@ def write_gsz(project: Project, path):
         ET.SubElement(rg, "PointIDs").text = ",".join(str(v) for v in ids)
     ET.SubElement(g, "Precision").text = "6,6,7"
     skipped = _write_model(root, project, region_ids, lines, {i: pt for i, pt in enumerate(points, 1)})
-    order = ["FileInfo", "Analyses", "BCs", "Contexts", "Coordinates", "Geometries", "Materials"]
+    order = ["FileInfo", "Analyses", "BCs", "Contexts", "Coordinates", "Geometries", "Materials", "StabilityItems",
+             "WaterItems"]
     kids = sorted(list(root), key=lambda e: order.index(e.tag) if e.tag in order else len(order))
     for k in list(root):
         root.remove(k)

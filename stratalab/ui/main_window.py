@@ -6,11 +6,11 @@ import sys
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QThread, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence, QPainter
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog,
                                QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
-                               QStyle, QTextBrowser, QToolBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QStyle, QTextBrowser, QToolBar, QToolButton, QLineEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, FILE_EXT, __version__
 from ..examples import EXAMPLES
@@ -21,9 +21,13 @@ from ..model import (ANALYSIS_KINDS, BC_KINDS, BC_TYPES, KIND_BCS, REINFORCEMENT
 from ..report import build_report
 from ..solver import solve, verify
 from .canvas import Canvas
-from .dialogs import (AIDialog, BCDialog, DefineProjectDialog, GraphDialog, MaterialsDialog, PointsDialog,
+from .dialogs import (AIDialog, BCDialog, DefineProjectDialog, EntryExitDialog, GraphDialog, MaterialsDialog, PointsDialog,
                       ProjectDialog, ReinforcementDialog, SliceTable, TextDialog)
 from .home import HomePage
+from .icons import tool_icon
+
+DRAW_ORDER = ("region", "assign", None, "piezo", "bc", None, "point_load", "surcharge", "reinforcement", None,
+              "entry_exit", "grid", None, "flux_section")
 from .pdf import export_pdf, paint_pages
 from .render import Renderer, View, available_fields, project_bounds, result_times
 
@@ -96,7 +100,7 @@ class MainWindow(QMainWindow):
         self._build_toolbars()
         self._build_status()
         self.canvas.status.connect(self.mode_label.setText)
-        self.canvas.coords.connect(lambda x, y: self.xy_label.setText(f"x: {x:.3f}   y: {y:.3f}"))
+        self.canvas.coords.connect(self._cursor_moved)
         geom = self.settings.value("window/geometry")
         if geom is not None:
             self.restoreGeometry(geom)
@@ -181,8 +185,13 @@ class MainWindow(QMainWindow):
         self.a_fit = A("Zoom to &Fit", self.canvas.zoom_fit, "F", S.SP_BrowserReload)
         self.a_zin = A("Zoom &In", lambda: self.zoom(1.25), "Ctrl+=")
         self.a_zout = A("Zoom &Out", lambda: self.zoom(0.8), "Ctrl+-")
-        self.a_define = A("&Definition View", lambda: self.set_view("define"), "Ctrl+1", checkable=True)
-        self.a_results = A("&Results View", lambda: self.set_view("results"), "Ctrl+2", checkable=True)
+        self.a_define = A("&Definition", lambda: self.set_view("define"), "Ctrl+1", checkable=True)
+        self.a_results = A("&Results", lambda: self.set_view("results"), "Ctrl+2", checkable=True)
+        self.a_layout = A("&Page Layout", self.page_layout, "Ctrl+3")
+        self.a_solve_mgr = A("Solve &Manager", self.show_solve_manager, "Ctrl+F5")
+        self.a_goto = A("&Go to Coordinate", self.goto_coordinate, "Ctrl+G")
+        for act, name in ((self.a_define, "define"), (self.a_results, "results"), (self.a_layout, "layout")):
+            act.setIcon(tool_icon(name))
         g = QActionGroup(self)
         g.addAction(self.a_define)
         g.addAction(self.a_results)
@@ -225,6 +234,15 @@ class MainWindow(QMainWindow):
             self.draw_group.addAction(a)
             self.draw_actions[mode] = a
         self.draw_actions["select"].setChecked(True)
+        for mode, act in self.draw_actions.items():
+            act.setIcon(tool_icon(mode))
+        self.a_mats.setIcon(tool_icon("materials"))
+        for act, name in ((self.a_zin, "zoom_in"), (self.a_zout, "zoom_out"), (self.a_print, "print"),
+                          (self.a_copy, "copy"), (self.opt_actions["grid"], "grid_toggle"),
+                          (self.opt_actions["snap"], "snap")):
+            act.setIcon(tool_icon(name))
+        self.a_analysis.setIcon(tool_icon("analyses"))
+        self.a_ee_dialog = A("Slip Surface Entry and Exit &Range...", self.entry_exit_dialog)
         self.a_verify = A("&Verify", self.verify_current, "F6", S.SP_DialogApplyButton)
         self.a_solve = A("&Solve Analysis", self.solve_current, "F5", S.SP_MediaPlay)
         self.a_solve_all = A("Solve &All", self.solve_all, "Shift+F5", S.SP_MediaSeekForward)
@@ -264,11 +282,11 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_exit)
 
         m = mb.addMenu("&Edit")
-        for a in (self.a_undo, self.a_redo, None, self.a_copy, None, self.a_edit_points, self.a_del_region):
+        for a in (self.a_undo, self.a_redo, None, self.a_copy, None, self.a_goto):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("&View")
-        for a in (self.a_define, self.a_results, None, self.a_fit, self.a_zin, self.a_zout, None):
+        for a in (self.a_define, self.a_results, self.a_layout, None, self.a_fit, self.a_zin, self.a_zout, None):
             m.addSeparator() if a is None else m.addAction(a)
         for a in self.opt_actions.values():
             m.addAction(a)
@@ -278,7 +296,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_graph)
 
         m = mb.addMenu("&Define")
-        for a in (self.a_proj, self.a_mats, self.a_analysis, None):
+        for a in (self.a_proj, self.a_analysis, self.a_mats, None):
             m.addSeparator() if a is None else m.addAction(a)
         add = m.addMenu("Add &Analysis")
         for a in self.a_add.values():
@@ -290,19 +308,27 @@ class MainWindow(QMainWindow):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("D&raw")
-        for mode, a in self.draw_actions.items():
-            m.addAction(a)
-            if mode in ("select", "assign", "surcharge", "grid", "flux_section"):
+        for mode in DRAW_ORDER:
+            if mode is None:
                 m.addSeparator()
+                continue
+            m.addAction(self.draw_actions[mode])
+            if mode == "entry_exit":
+                m.addAction(self.a_ee_dialog)
 
-        m = mb.addMenu("&Analysis")
-        for a in (self.a_verify, self.a_solve, self.a_solve_all, self.a_stop):
-            m.addAction(a)
+        m = mb.addMenu("&Sketch")
+        m.addAction(self.draw_actions["text"])
+        m.addAction(self.opt_actions["axes"])
 
-        m = mb.addMenu("A&I")
-        m.addAction(self.a_ai)
+        m = mb.addMenu("&Modify")
+        for a in (self.draw_actions["select"], self.draw_actions["pan"], None, self.a_edit_points, self.a_del_region,
+                  None, self.a_del_analysis, self.a_clear):
+            m.addSeparator() if a is None else m.addAction(a)
 
         self.window_menu = mb.addMenu("&Window")
+        for a in (self.a_solve_mgr, self.a_verify, self.a_solve, self.a_solve_all, self.a_stop):
+            self.window_menu.addAction(a)
+        self.window_menu.addSeparator()
         for d in (self.explorer_dock, self.props_dock, self.solve_dock):
             self.window_menu.addAction(d.toggleViewAction())
         self.window_menu.addSeparator()
@@ -311,31 +337,36 @@ class MainWindow(QMainWindow):
 
         m = mb.addMenu("&Help")
         m.addAction(self.a_guide)
+        m.addAction(self.a_ai)
+        m.addSeparator()
         m.addAction(self.a_about)
 
     def _build_toolbars(self):
-        def tb(name, actions):
+        first_window_action = self.window_menu.actions()[0]
+
+        def tb(name, actions, area=Qt.TopToolBarArea):
             t = QToolBar(name, self)
             t.setObjectName(name)
             for a in actions:
                 t.addSeparator() if a is None else t.addAction(a)
-            self.addToolBar(t)
-            self.window_menu.insertAction(self.window_menu.actions()[0], t.toggleViewAction())
+            self.addToolBar(area, t)
+            self.window_menu.insertAction(first_window_action, t.toggleViewAction())
             return t
-        tb("File", [self.a_new, self.a_open, self.a_save, None, self.a_pdf, self.a_undo, self.a_redo])
-        tb("Mode", [self.a_define, self.a_results, None, self.a_fit])
-        tb("Solve", [self.a_verify, self.a_solve, self.a_solve_all, self.a_stop])
+        tb("Standard", [self.a_new, self.a_open, self.a_save, None, self.a_print, self.a_pdf, None, self.a_copy,
+                        None, self.a_undo, self.a_redo, None, self.a_verify, self.a_solve, self.a_solve_all,
+                        self.a_stop, None, self.a_zin, self.a_zout, self.a_fit])
         self.addToolBarBreak()
-        t = tb("Draw", [self.draw_actions[k] for k in ("select", "region", "assign", "piezo", "bc", "point_load",
-                                                        "surcharge", "entry_exit", "grid", "reinforcement",
-                                                        "flux_section", "text", "pan")])
-        t.addSeparator()
-        t.addWidget(QLabel(" Material: "))
+        m = tb("Mode", [self.a_define, self.a_results, self.a_layout, None, self.draw_actions["select"],
+                        self.a_analysis, self.a_mats])
+        m.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        for act in (self.draw_actions["select"], self.a_analysis, self.a_mats):
+            m.widgetForAction(act).setToolButtonStyle(Qt.ToolButtonIconOnly)
+        m.addSeparator()
+        m.addWidget(QLabel(" Material: "))
         self.mat_combo = QComboBox()
         self.mat_combo.setMinimumWidth(150)
         self.mat_combo.activated.connect(lambda i: setattr(self, "current_material_id", self.mat_combo.itemData(i)))
-        t.addWidget(self.mat_combo)
-        tb("AI", [self.a_ai])
+        m.addWidget(self.mat_combo)
         r = tb("Results", [])
         r.addWidget(QLabel(" Contour: "))
         self.field_combo = QComboBox()
@@ -348,15 +379,89 @@ class MainWindow(QMainWindow):
         self.time_combo.activated.connect(lambda i: self.set_opt("time_index", self.time_combo.itemData(i)))
         r.addWidget(self.time_combo)
         r.addAction(self.opt_actions["deformed"])
+        # drawing tools down the right-hand side of the drawing
+        d = tb("Draw", [None if k is None else self.draw_actions[k] for k in DRAW_ORDER + ("text", "pan")],
+               Qt.RightToolBarArea)
+        d.setIconSize(QSize(26, 26))
 
     def _build_status(self):
         self.mode_label = QLabel("")
         self.xy_label = QLabel("")
         self.units_label = QLabel("")
         sb = self.statusBar()
+        sb.addWidget(QLabel(" 2-Dimensional "))
         sb.addWidget(self.mode_label, 1)
-        sb.addPermanentWidget(self.xy_label)
+        sb.addPermanentWidget(QLabel("Go to coordinate (Ctrl+G):"))
+        self.goto_edit = QLineEdit()
+        self.goto_edit.setFixedWidth(200)
+        self.goto_edit.setToolTip("Cursor position. Type x, y and press Enter to centre the view there.")
+        self.goto_edit.returnPressed.connect(self._goto_from_edit)
+        sb.addPermanentWidget(self.goto_edit)
+        for act in (self.opt_actions["grid"], self.opt_actions["snap"], self.a_zin, self.a_zout, self.a_fit):
+            b = QToolButton()
+            b.setDefaultAction(act)
+            b.setAutoRaise(True)
+            sb.addPermanentWidget(b)
+        self.scale_label = QLabel("")
+        sb.addPermanentWidget(self.scale_label)
         sb.addPermanentWidget(self.units_label)
+
+    def _cursor_moved(self, x, y):
+        unit = "m" if self.project.units == "metric" else "ft"
+        if not self.goto_edit.hasFocus():
+            self.goto_edit.setText(f"{x:.6f}, {y:.6f} {unit}")
+        self.update_scale()
+
+    def _goto_from_edit(self):
+        try:
+            txt = self.goto_edit.text().replace(";", ",").replace("ft", "").replace("m", "")
+            x, y = (float(v) for v in txt.split(",")[:2])
+        except ValueError:
+            self.statusBar().showMessage("Type the coordinate as x, y", 3000)
+            return
+        self.canvas.view.cx, self.canvas.view.cy = x, y
+        self.canvas.update()
+        self.update_scale()
+
+    def goto_coordinate(self):
+        self.goto_edit.setFocus()
+        self.goto_edit.selectAll()
+
+    def update_scale(self):
+        """Engineering scale of the drawing, 1 : N (model length per unit of screen length)."""
+        dpm = self.canvas.logicalDpiX() / 0.0254           # screen pixels per metre
+        s = self.canvas.view.s                               # pixels per model length unit
+        if s > 0:
+            unit_m = 1.0 if self.project.units == "metric" else 0.3048
+            self.scale_label.setText(f"  1:{dpm * unit_m / s:,.0f}  ")
+
+    def show_solve_manager(self):
+        self.solve_dock.show()
+        self.solve_dock.raise_()
+
+    def page_layout(self):
+        """Print preview of the drawing and results pages."""
+        from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
+        pr = QPrinter(QPrinter.HighResolution)
+        pr.setPageOrientation(pr.pageLayout().Landscape)
+        dlg = QPrintPreviewDialog(pr, self)
+        dlg.setWindowTitle("Page Layout")
+        mode = "results" if (self.current_analysis() and self.current_analysis().results) else "define"
+        dlg.paintRequested.connect(lambda printer: paint_pages(printer, self.project, self.current_analysis(), mode,
+                                                               self.opts, printer.newPage))
+        dlg.resize(1100, 800)
+        dlg.exec()
+
+    def entry_exit_dialog(self):
+        a = self.current_analysis()
+        if a is None or a.kind != "slope":
+            QMessageBox.information(self, APP_NAME, "Select a slope stability analysis first.")
+            return
+        d = EntryExitDialog(self.project, a, self)
+        if d.exec():
+            self.before_change()
+            d.apply(a)
+            self.after_change("Set entry and exit")
 
     def showEvent(self, e):
         if self.default_state is None:
@@ -490,6 +595,8 @@ class MainWindow(QMainWindow):
     # refresh
     # ------------------------------------------------------------------
     def refresh_all(self):
+        if hasattr(self, "scale_label"):
+            self.update_scale()
         self.refresh_tree()
         self.refresh_props()
         self.mat_combo.clear()

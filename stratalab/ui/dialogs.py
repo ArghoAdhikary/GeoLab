@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QListWidget, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
-                               QSpinBox, QStackedWidget, QStyle, QTableWidget, QTableWidgetItem, QTabWidget,
+                               QScrollArea, QSpinBox, QStackedWidget, QStyle, QTableWidget, QTableWidgetItem, QTabWidget,
                                QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QVBoxLayout, QWidget)
 
 from ..geometry import auto_entry_exit
@@ -307,7 +307,6 @@ class MaterialsDialog(QDialog):
             form = Form(spec, project.unit)
             self.forms.append(form)
             self.fields.update(form.w)
-            from PySide6.QtWidgets import QScrollArea
             sc = QScrollArea()
             sc.setWidgetResizable(True)
             sc.setWidget(form)
@@ -423,7 +422,7 @@ STEADY = {"steady": "Steady-State", "transient": "Transient"}
 
 # Analysis Type combo in the header: (attribute, {stored value: label}, {combo key: stored value} or None)
 ANALYSIS_TYPES = {
-    "slope": ("method", SLOPE_METHODS, None),
+    "slope": ("method", {"le": "Limit Equilibrium", "fe": "Finite Element Stress-based"}, None),
     "seepage": ("transient", STEADY, {"steady": False, "transient": True}),
     "thermal": ("transient", STEADY, {"steady": False, "transient": True}),
     "air": ("transient", STEADY, {"steady": False, "transient": True}),
@@ -464,13 +463,15 @@ KIND_TABS = {
             ("Time", TIME)],
 }
 
-SLOPE_EXTRA = [("Loads and Cracks", [
-    ("kh", "Horizontal seismic coefficient kh", "float"), ("kv", "Vertical seismic coefficient kv (down +)", "float"),
-    ("tension_crack_depth", "Tension crack depth (0 = none)", "float", "length"),
-    ("tension_crack_angle", "Tension crack where base steeper than (deg, 0 = off)", "float"),
-    ("crack_water", "Fraction of crack filled with water", "float"),
-    ("optimize", "Optimize the critical slip surface (non-circular)", "bool"),
-    ("opt_iterations", "Optimization trials", "int")])]
+SLOPE_EXTRA = []
+SLOPE_OPTIMIZATION = [("optimize", "Optimize the critical slip surface (non-circular)", "bool"),
+                      ("opt_iterations", "Optimization trials", "int")]
+SLOPE_CONVERGENCE = [("n_slices", "Number of slices", "int")]
+SLOPE_LOADS = [("kh", "Horizontal seismic coefficient kh", "float"),
+               ("kv", "Vertical seismic coefficient kv (down +)", "float")]
+SLOPE_CRACK = [("tension_crack_depth", "Tension crack depth (0 = none)", "float", "length"),
+               ("tension_crack_angle", "Tension crack where base steeper than (deg, 0 = off)", "float"),
+               ("crack_water", "Fraction of crack filled with water", "float")]
 
 
 def descendants(project, aid):
@@ -514,7 +515,9 @@ class AnalysisEditor(QWidget):
         attr, labels, to_value = ANALYSIS_TYPES.get(a.kind, (None, {"": a.kind}, None))
         self.type_attr, self.type_map = attr, to_value
         current = None
-        if attr:
+        if a.kind == "slope":
+            current = "fe" if a.method == "finite_element" else "le"
+        elif attr:
             val = getattr(a, attr)
             current = next((k for k, x in to_value.items() if x == val), None) if to_value else val
         self.type_cb = combo(labels, current)
@@ -559,6 +562,8 @@ class AnalysisEditor(QWidget):
     # ------------------------------------------------------------------
     def type_value(self):
         key = self.type_cb.currentData()
+        if self.a.kind == "slope":
+            return "finite_element" if key == "fe" else self.method.currentData()
         return self.type_map[key] if self.type_map else key
 
     def _field(self, key):
@@ -586,8 +591,11 @@ class AnalysisEditor(QWidget):
             self._enable("n_eq_iter", bool(val))
             timed = True
         elif a.kind == "slope":
-            self.inter.setEnabled(val == "morgenstern_price")
-            self.inter_pts.setEnabled(val == "morgenstern_price")
+            le = self.type_cb.currentData() == "le"
+            self.method.setEnabled(le)
+            mp = le and self.method.currentData() == "morgenstern_price"
+            self.inter.setEnabled(mp)
+            self.inter_pts.setEnabled(mp)
             timed = False
         else:
             timed = bool(val) if a.kind in ("seepage", "thermal", "air") else True
@@ -599,21 +607,31 @@ class AnalysisEditor(QWidget):
 
     def _slope_tabs(self, tabs):
         a, project = self.a, self.p
-        self.method = self.type_cb
         t = QWidget(); f = QFormLayout(t)
+        self.method = combo({k: v for k, v in SLOPE_METHODS.items() if k != "finite_element"},
+                            a.method if a.method != "finite_element" else "morgenstern_price")
+        self.method.currentIndexChanged.connect(self._type_changed)
         self.inter = combo(INTERSLICE_FUNCTIONS, a.interslice)
         self.inter_pts = QPlainTextEdit("\n".join(f"{x:g}, {y:g}" for x, y in a.interslice_points))
         self.inter_pts.setMaximumHeight(60)
         self.inter_pts.setPlaceholderText("x/L, f(x)  per line (for 'Data points')")
-        self.nsl = ispin(a.n_slices, 5, 500)
+        self.nsl = None
         self.pwp = combo(PWP_MODES, a.pwp)
         self.ru = dspin(a.ru, 0, 1, 3, 0.05)
-        f.addRow("Interslice function (Morgenstern-Price)", self.inter)
-        f.addRow("Interslice data points", self.inter_pts)
-        f.addRow("Number of slices", self.nsl)
-        f.addRow("PWP conditions from", self.pwp)
-        f.addRow("Ru", self.ru)
-        tabs.addTab(t, "Slope Stability")
+        f.addRow("Method:", self.method)
+        f.addRow("    Side Function:", self.inter)
+        f.addRow("    Side function data points:", self.inter_pts)
+        f.addRow("PWP Conditions from:", self.pwp)
+        f.addRow("    Ru:", self.ru)
+        loads = Form(SLOPE_LOADS, project.unit)
+        loads.load(a)
+        self.forms.append(loads)
+        f.addRow(QLabel("<b>Seismic (pseudo-static)</b>"))
+        f.addRow(loads)
+        f.addRow(QLabel("<b>Physical Constants</b>"))
+        uw = QLabel(f"{project.gamma_w:g} {project.unit('unit_weight') if hasattr(project, 'unit') else ''}")
+        f.addRow("Unit Weight of Water:", uw)
+        tabs.addTab(t, "Settings")
 
         s = a.search
         t = QWidget(); grid = QGridLayout(t)
@@ -622,7 +640,7 @@ class AnalysisEditor(QWidget):
         self.sf = {}
         fields = [("entry_x1", "Entry x from"), ("entry_x2", "Entry x to"), ("exit_x1", "Exit x from"),
                   ("exit_x2", "Exit x to"), ("n_entry", "Entry increments"), ("n_exit", "Exit increments"),
-                  ("n_radius", "Radius increments"), ("min_depth", "Minimum slip depth"),
+                  ("n_radius", "Radius increments"),
                   ("grid_x1", "Grid x1"), ("grid_y1", "Grid y1"), ("grid_x2", "Grid x2"), ("grid_y2", "Grid y2"),
                   ("grid_nx", "Grid x increments"), ("grid_ny", "Grid y increments"),
                   ("radius_min", "Radius min"), ("radius_max", "Radius max"), ("n_radii", "Radius increments (grid)"),
@@ -650,13 +668,26 @@ class AnalysisEditor(QWidget):
         auto = QPushButton("Auto entry/exit from geometry")
         auto.clicked.connect(self.auto)
         grid.addWidget(auto, r + 5, 0, 1, 2)
-        tabs.addTab(t, "Slip Surface")
+        crack = Form(SLOPE_CRACK, project.unit)
+        crack.load(a)
+        self.forms.append(crack)
+        grid.addWidget(QLabel("<b>Tension crack</b>"), r + 6, 0, 1, 4)
+        grid.addWidget(crack, r + 7, 0, 1, 4)
+        scroll = QScrollArea()
+        scroll.setWidget(t)
+        scroll.setWidgetResizable(True)
+        tabs.addTab(scroll, "Slip Surface")
+        opt = Form(SLOPE_OPTIMIZATION, project.unit)
+        opt.load(a)
+        self.forms.append(opt)
+        tabs.addTab(opt, "Optimization")
 
         t = QWidget(); f = QFormLayout(t)
         self.prob = QCheckBox("Run Monte Carlo on the critical slip surface")
         self.prob.setChecked(a.probabilistic)
         self.ns = ispin(a.n_samples, 10, 100000)
         self.seed = ispin(a.seed, 0, 2 ** 31 - 1)
+        f.addRow(QLabel("<b>Probabilistic analysis</b>"))
         f.addRow(self.prob)
         f.addRow("Number of samples", self.ns)
         f.addRow("Random seed", self.seed)
@@ -674,7 +705,13 @@ class AnalysisEditor(QWidget):
         f.addRow("From", self.slo)
         f.addRow("To", self.shi)
         f.addRow("Steps", self.sst)
-        tabs.addTab(t, "Probabilistic / Sensitivity")
+        tabs.addTab(t, "Distribution")
+        conv = Form(SLOPE_CONVERGENCE, project.unit)
+        conv.load(a)
+        self.forms.append(conv)
+        self.min_depth = dspin(a.search.min_depth, 0, 1e6, 3, 0.1)
+        conv.layout().addRow(f"Minimum slip surface depth ({project.unit('length')})", self.min_depth)
+        tabs.addTab(conv, "Convergence")
 
     def auto(self):
         if not self.p.regions:
@@ -748,11 +785,11 @@ class AnalysisEditor(QWidget):
             raise ValueError("Pore pressure 'From seepage analysis' needs a parent seepage analysis.")
         a.interslice = self.inter.currentData()
         a.interslice_points = [r for r in self._parse_rows(self.inter_pts.toPlainText(), 2) if r]
-        a.n_slices = self.nsl.value()
         a.pwp = self.pwp.currentData()
         a.ru = self.ru.value()
         s = a.search
         s.mode = self.mode.currentData()
+        s.min_depth = self.min_depth.value()
         for k, w in self.sf.items():
             setattr(s, k, w.value())
         if nums:
@@ -1017,6 +1054,125 @@ class DefineProjectDialog(QDialog):
                 seen.add(cur)
                 cur = self.p.analysis(cur).parent_id
         self.accept()
+
+
+class EntryExitDialog(QDialog):
+    """Slip surface entry and exit ranges, entered as left-side and right-side ranges on the ground
+    surface. The higher range is where slip surfaces enter, the lower one where they exit."""
+
+    def __init__(self, project, analysis, parent=None):
+        super().__init__(parent)
+        from ..geometry import GroundProfile
+        self.setWindowTitle("Draw Slip Surface Entry and Exit Range")
+        self.gp = GroundProfile(project.regions, samples=800) if project.regions else None
+        s = analysis.search
+        if s.entry_x1 == s.entry_x2 == s.exit_x1 == s.exit_x2 == 0 and project.regions:
+            (s_e1, s_e2), (s_x1, s_x2) = auto_entry_exit(project)
+        else:
+            s_e1, s_e2, s_x1, s_x2 = s.entry_x1, s.entry_x2, s.exit_x1, s.exit_x2
+        entry, exit_ = sorted((s_e1, s_e2)), sorted((s_x1, s_x2))
+        if entry[0] > exit_[0]:
+            left, right, ninc_l, ninc_r = exit_, entry, s.n_exit, s.n_entry
+        else:
+            left, right, ninc_l, ninc_r = entry, exit_, s.n_entry, s.n_exit
+        unit = project.unit("length") if hasattr(project, "unit") else ""
+        v = QVBoxLayout(self)
+        sides = QHBoxLayout()
+        self.side = {}
+        for key, rng, ninc in (("left", left, ninc_l), ("right", right, ninc_r)):
+            box = QWidget()
+            g = QGridLayout(box)
+            g.setContentsMargins(0, 0, 12, 0)
+            title = QLabel()
+            title.setStyleSheet("font-weight:600")
+            g.addWidget(title, 0, 0, 1, 5)
+            typ = QComboBox()
+            typ.addItems(["Range", "Point"])
+            g.addWidget(QLabel("Type:"), 1, 0)
+            g.addWidget(typ, 2, 0)
+            g.addWidget(QLabel("Left Point:"), 1, 1, 1, 2)
+            g.addWidget(QLabel("Right Point:"), 1, 3, 1, 2)
+            x1, x2 = dspin(rng[0], -1e7, 1e7, 3), dspin(rng[1], -1e7, 1e7, 3)
+            y1, y2 = QLabel(), QLabel()
+            for w in (x1, x2):
+                w.setSuffix(f" {unit}" if unit else "")
+            g.addWidget(QLabel("X:"), 2, 1); g.addWidget(x1, 2, 2)
+            g.addWidget(QLabel("X:"), 2, 3); g.addWidget(x2, 2, 4)
+            g.addWidget(QLabel("Y:"), 3, 1); g.addWidget(y1, 3, 2)
+            g.addWidget(QLabel("Y:"), 3, 3); g.addWidget(y2, 3, 4)
+            n = ispin(max(1, int(ninc) - 1), 1, 200)
+            g.addWidget(QLabel("Number of increments over range:"), 4, 0, 1, 3)
+            g.addWidget(n, 4, 3, 1, 2)
+            self.side[key] = {"title": title, "type": typ, "x1": x1, "x2": x2, "y1": y1, "y2": y2, "n": n}
+            for w in (x1, x2):
+                w.valueChanged.connect(self._update)
+            typ.currentIndexChanged.connect(self._update)
+            sides.addWidget(box)
+        v.addLayout(sides)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Number of radius increments:"))
+        self.nr = ispin(max(1, int(s.n_radius) - 1), 1, 200)
+        row.addWidget(self.nr)
+        row.addStretch(1)
+        v.addLayout(row)
+        note = QLabel("Y is read from the ground surface. Slip surfaces enter through the higher range and "
+                      "exit through the lower one; the direction of movement follows from that.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#666")
+        v.addWidget(note)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.try_accept)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+        self._update()
+
+    def _ground(self, x):
+        return float(self.gp.ground(x)) if self.gp is not None else float("nan")
+
+    def _update(self, *_):
+        for key, d in self.side.items():
+            point = d["type"].currentIndex() == 1
+            d["x2"].setEnabled(not point)
+            d["n"].setEnabled(not point)
+            if point:
+                d["x2"].blockSignals(True)
+                d["x2"].setValue(d["x1"].value())
+                d["x2"].blockSignals(False)
+            for xk, yk in (("x1", "y1"), ("x2", "y2")):
+                d[yk].setText(f"{self._ground(d[xk].value()):.3f}")
+        left_hi = self._mid_y("left") > self._mid_y("right")
+        self.side["left"]["title"].setText("Entry Range (Left Side)" if left_hi else "Exit Range (Left Side)")
+        self.side["right"]["title"].setText("Exit Range (Right Side)" if left_hi else "Entry Range (Right Side)")
+
+    def _mid_y(self, key):
+        d = self.side[key]
+        return self._ground(0.5 * (d["x1"].value() + d["x2"].value()))
+
+    def ranges(self):
+        """((entry x1, x2, points), (exit x1, x2, points))."""
+        out = {}
+        for key, d in self.side.items():
+            a, b = sorted((d["x1"].value(), d["x2"].value()))
+            pts = 1 if d["type"].currentIndex() == 1 else d["n"].value() + 1
+            out[key] = (a, b, pts)
+        if self._mid_y("left") > self._mid_y("right"):
+            return out["left"], out["right"]
+        return out["right"], out["left"]
+
+    def try_accept(self):
+        (e1, e2, _), (x1, x2, _) = self.ranges()
+        if max(e1, x1) <= min(e2, x2):
+            QMessageBox.warning(self, "Invalid input", "The two ranges overlap; move one of them.")
+            return
+        self.accept()
+
+    def apply(self, a):
+        (e1, e2, ne), (x1, x2, nx) = self.ranges()
+        s = a.search
+        s.mode = "entry_exit"
+        s.entry_x1, s.entry_x2, s.n_entry = e1, e2, ne
+        s.exit_x1, s.exit_x2, s.n_exit = x1, x2, nx
+        s.n_radius = self.nr.value() + 1
 
 
 # ---------------------------------------------------------------------------

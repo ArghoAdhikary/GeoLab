@@ -176,3 +176,67 @@ def test_imported_consolidation_solves(tmp_path):
         a.mesh_size = 0.5
     r = solve(p, p.analyses[1])
     assert r["settlement_history"][-1] > r["settlement_history"][0] > 0
+
+
+# structure of a GeoStudio 2026 SLOPE/W project (entry and exit, piezometric line)
+SLOPE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<GSIData Version="11.15" AppVersion="26.1.0.1261">
+  <FileInfo FileVersion="11.15" RevNumber="1" />
+  <Analyses Len="1"><Analysis><ID>1</ID><Name>Slope Stability</Name><Kind>SLOPE/W</Kind>
+    <Method>Morgenstern-Price</Method><GeometryId>1</GeometryId></Analysis></Analyses>
+  <Contexts Len="1"><Context><AnalysisID>1</AnalysisID><GeometryUsesMaterials Len="2">
+    <GeometryUsesMaterial ID="Regions-1" Entry="2" /><GeometryUsesMaterial ID="Regions-2" Entry="1" />
+  </GeometryUsesMaterials></Context></Contexts>
+  <Coordinates><EngCoords UnitSystem="Metric" /></Coordinates>
+  <Geometries Len="1"><Geometry><Name>2D Geometry</Name>
+    <Points Len="7"><Point ID="1" X="0" Y="0" /><Point ID="2" X="50" Y="0" /><Point ID="3" X="50" Y="10" />
+      <Point ID="4" X="15" Y="10" /><Point ID="5" X="0" Y="10" /><Point ID="6" X="50" Y="20" />
+      <Point ID="7" X="30" Y="20" /></Points>
+    <Regions Len="2"><Region><ID>1</ID><PointIDs>1,2,3,4,5</PointIDs></Region>
+      <Region><ID>2</ID><PointIDs>4,3,6,7</PointIDs></Region></Regions>
+  </Geometry></Geometries>
+  <Materials Len="2">
+    <Material><ID>1</ID><Name>sand</Name><SlopeModel>MohrCoulomb</SlopeModel><StressStrain>
+      <UnitWeight>20</UnitWeight><CohesionPrime>2</CohesionPrime><PhiPrime>33</PhiPrime></StressStrain></Material>
+    <Material><ID>2</ID><Name>clay</Name><SlopeModel>MohrCoulomb</SlopeModel><StressStrain>
+      <UnitWeight>18</UnitWeight><CohesionPrime>10</CohesionPrime><PhiPrime>25</PhiPrime></StressStrain></Material>
+  </Materials>
+  <StabilityItems Len="1"><StabilityItem><AnalysisID>1</AnalysisID><Entry>
+    <DataPoints Len="3"><DataPoint Number="1" X="0" Y="8" /><DataPoint Number="2" X="25" Y="12" />
+      <DataPoint Number="3" X="50" Y="16" /></DataPoints>
+    <SlipSurface><EntryExit><LeftSideLeftPt X="3" Y="10" /><LeftSideRightPt X="15" Y="10" /><LeftInc>8</LeftInc>
+      <RightSideLeftPt X="32" Y="20" /><RightSideRightPt X="46" Y="20" /><RightInc>8</RightInc></EntryExit>
+      <DirectionOfSlip>RightToLeft</DirectionOfSlip></SlipSurface>
+    <PiezometricSurfaces Len="1"><PiezometricSurface><ID>1</ID><DataPoints Len="3"><DataPoint>1</DataPoint>
+      <DataPoint>2</DataPoint><DataPoint>3</DataPoint></DataPoints></PiezometricSurface></PiezometricSurfaces>
+  </Entry></StabilityItem></StabilityItems>
+  <WaterItems Len="1"><WaterItem><AnalysisID>1</AnalysisID><Entry><ResultInputInfo><Option>PiezoSurface</Option>
+    </ResultInputInfo><UnitWaterWeight>9.807</UnitWaterWeight></Entry></WaterItem></WaterItems>
+</GSIData>"""
+
+
+def test_import_slope_project_and_solve(tmp_path):
+    p = read_gsz(make_gsz(tmp_path / "slope.gsz", SLOPE))
+    a = p.analyses[0]
+    assert (a.kind, a.method, a.pwp) == ("slope", "morgenstern_price", "piezometric")
+    assert p.piezometric_line == [[0, 8], [25, 12], [50, 16]]
+    s = a.search
+    assert (s.mode, s.entry_x1, s.entry_x2, s.exit_x1, s.exit_x2, s.n_entry, s.n_exit) == \
+        ("entry_exit", 32, 46, 3, 15, 9, 9)
+    names = {m.id: m.name for m in p.materials}
+    assert [names[r.material_id] for r in p.regions] == ["clay", "sand"]
+    from stratalab.solver import solve
+    fos = solve(p, a)["critical"]["fos"]
+    assert 1.15 < fos < 1.35          # toe circle through the sand; 1.24 with this search
+
+
+def test_slope_project_export_round_trip(tmp_path):
+    p = read_gsz(make_gsz(tmp_path / "slope.gsz", SLOPE))
+    out = tmp_path / "again.gsz"
+    assert write_gsz(p, out) == []
+    q = read_gsz(out)
+    a, b = p.analyses[0], q.analyses[0]
+    assert (b.kind, b.method, b.pwp) == (a.kind, a.method, a.pwp)
+    assert vars(b.search) == vars(a.search) and q.piezometric_line == p.piezometric_line
+    assert [(m.name, m.cohesion, m.phi, m.unit_weight) for m in q.materials] == \
+        [(m.name, m.cohesion, m.phi, m.unit_weight) for m in p.materials]
