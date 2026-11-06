@@ -3,10 +3,10 @@ import math
 import numpy as np
 import pytest
 
-from stratalab.examples import homogeneous_slope
-from stratalab.geometry import GroundProfile, point_in_polygon
-from stratalab.model import new_project
-from stratalab.slope import (build_slices, circle_surface, factor_of_safety, find_extent, polyline_surface,
+from geolab.examples import homogeneous_slope
+from geolab.geometry import GroundProfile, point_in_polygon
+from geolab.model import new_project
+from geolab.slope import (build_slices, circle_surface, factor_of_safety, find_extent, polyline_surface,
                              run_slope)
 
 METHODS = ["ordinary", "bishop", "janbu", "spencer", "morgenstern_price"]
@@ -95,7 +95,7 @@ def test_water_and_seismic_reduce_fos():
     base, _ = factor_of_safety(build_slices(p, a, surf)[0], "bishop")
     p.piezometric_line = [[0, 5], [20, 5], [40, 12], [70, 12]]
     a.pwp = "piezometric"
-    from stratalab.slope import make_pwp_fn
+    from geolab.slope import make_pwp_fn
     wet, _ = factor_of_safety(build_slices(p, a, surf, make_pwp_fn(p, a))[0], "bishop")
     a.pwp = "none"
     a.kh = 0.1
@@ -180,7 +180,7 @@ def test_sensitivity_increases_with_cohesion():
 
 
 def test_surcharge_reduces_fos_at_crest():
-    from stratalab.model import Surcharge
+    from geolab.model import Surcharge
     p = acads()
     a = p.analyses[0]
     a.method = "bishop"

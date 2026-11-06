@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from stratalab.model import new_project
+from geolab.model import new_project
 
 
 @pytest.fixture(scope="module")
@@ -20,7 +20,7 @@ def win(app, tmp_path, monkeypatch):
     from PySide6.QtCore import QSettings
     QSettings.setDefaultFormat(QSettings.IniFormat)
     QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(tmp_path))
-    from stratalab.ui import main_window
+    from geolab.ui import main_window
     ini = str(tmp_path / "settings.ini")
     monkeypatch.setattr(main_window, "QSettings", lambda *a, **k: QSettings(ini, QSettings.IniFormat))
     w = main_window.MainWindow()
@@ -31,7 +31,7 @@ def win(app, tmp_path, monkeypatch):
 
 
 def test_home_page_new_analysis_opens_define_window(win, app, monkeypatch):
-    from stratalab.ui import main_window
+    from geolab.ui import main_window
     seen = []
 
     class FakeDefine:
@@ -60,7 +60,7 @@ def test_home_page_lists_recent_and_examples(win, tmp_path):
 
 
 def test_define_window_add_child_types_and_delete(app, monkeypatch):
-    from stratalab.ui.dialogs import DefineProjectDialog
+    from geolab.ui.dialogs import DefineProjectDialog
     p = new_project(kind="stress")
     d = DefineProjectDialog(p, p.analyses[0].id)
     ed = d.editors[p.analyses[0].id]
@@ -88,8 +88,8 @@ def test_define_window_add_child_types_and_delete(app, monkeypatch):
 
 
 def test_define_window_applies_to_main_window(win, monkeypatch):
-    from stratalab.ui import main_window
-    from stratalab.ui.dialogs import DefineProjectDialog
+    from geolab.ui import main_window
+    from geolab.ui.dialogs import DefineProjectDialog
 
     class AutoDefine(DefineProjectDialog):
         def exec(self):
@@ -106,7 +106,7 @@ def test_define_window_applies_to_main_window(win, monkeypatch):
 
 
 def test_k0_procedure_matches_hand_calculation():
-    from stratalab.sigma import k0_stress, overburden
+    from geolab.sigma import k0_stress, overburden
     p = new_project(kind="stress")
     p.add_region([[0, 0], [10, 0], [10, 4], [0, 4]], p.materials[0].id)
     m2 = p.add_material("Top", unit_weight=18.0)
@@ -120,8 +120,8 @@ def test_k0_procedure_matches_hand_calculation():
 
 
 def test_k0_in_situ_analysis_solves():
-    from stratalab.examples import EXAMPLES
-    from stratalab.solver import solve
+    from geolab.examples import EXAMPLES
+    from geolab.solver import solve
     names = [n for n in EXAMPLES if "onsolid" in n or "tress" in n]
     p = EXAMPLES[names[0]]()
     a = next(a for a in p.analyses if a.kind == "stress" and a.stress_type == "insitu")

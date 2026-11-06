@@ -5,12 +5,12 @@ import math
 import numpy as np
 import pytest
 
-from stratalab.examples import homogeneous_slope
-from stratalab.geometry import GroundProfile
-from stratalab.model import new_project
-from stratalab.slope import (ALL_LE_METHODS, build_slices, circle_surface, factor_of_safety, make_pwp_fn,
+from geolab.examples import homogeneous_slope
+from geolab.geometry import GroundProfile
+from geolab.model import new_project
+from geolab.slope import (ALL_LE_METHODS, build_slices, circle_surface, factor_of_safety, make_pwp_fn,
                              run_slope)
-from stratalab.strength import hoek_brown_table, strength_at
+from geolab.strength import hoek_brown_table, strength_at
 
 
 @pytest.fixture(scope="module")

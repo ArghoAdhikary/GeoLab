@@ -9,9 +9,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from stratalab import assistant as A
-from stratalab.ai import AIError
-from stratalab.model import new_project
+from geolab import assistant as A
+from geolab.ai import AIError
+from geolab.model import new_project
 
 from test_ai import GOOD
 
@@ -188,7 +188,7 @@ def app():
 @pytest.fixture
 def win(app, tmp_path, monkeypatch):
     from PySide6.QtCore import QSettings
-    from stratalab.ui import main_window
+    from geolab.ui import main_window
     ini = str(tmp_path / "settings.ini")
     monkeypatch.setattr(main_window, "QSettings", lambda *a, **k: QSettings(ini, QSettings.IniFormat))
     w = main_window.MainWindow()
@@ -201,7 +201,7 @@ def win(app, tmp_path, monkeypatch):
         extra.close()
     w.dirty = False
     w.close()
-    from stratalab.ui.theme import apply_theme
+    from geolab.ui.theme import apply_theme
     apply_theme("light")
 
 
@@ -226,7 +226,7 @@ def test_chat_head_popup_and_side_panel(win, app):
 
 
 def test_chat_actions_edit_build_and_open_windows(win, app, monkeypatch):
-    from stratalab.ui import main_window
+    from geolab.ui import main_window
     c = win.chat
     win.set_project(slope_project())
     n_undo = len(win.undo_stack)
@@ -268,8 +268,8 @@ def test_chat_send_runs_in_background_and_solves(win, app, monkeypatch):
 
 def test_theme_switch_recolours_canvas_and_home(win, app):
     from PySide6.QtGui import QPalette
-    from stratalab.ui import render
-    from stratalab.ui.theme import is_dark
+    from geolab.ui import render
+    from geolab.ui.theme import is_dark
     win.set_theme("dark")
     assert is_dark() and app.palette().color(QPalette.Window).lightness() < 80
     assert win.settings.value("ui/theme") == "dark" and win.a_theme["dark"].isChecked()
@@ -284,7 +284,7 @@ def test_theme_switch_recolours_canvas_and_home(win, app):
 
 def test_preferences_save_provider_and_toggle_chat(win, app, monkeypatch):
     from PySide6.QtWidgets import QDialog
-    from stratalab.ui import prefs
+    from geolab.ui import prefs
     d = prefs.PreferencesDialog(win.settings, win, "ai")
     assert d.tabs.currentIndex() == 1
     d.provider.setCurrentIndex(d.provider.findData("compatible"))

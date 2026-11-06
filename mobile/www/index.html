@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1d4e89">
+<title>GeoLab</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="boot">
+  <img src="icon.svg" alt="" width="84" height="84">
+  <h1>GeoLab</h1>
+  <p id="boot-msg">Starting...</p>
+  <div class="bar"><div></div></div>
+</div>
+
+<header id="top">
+  <button class="icon" id="btn-home" aria-label="Start page">
+    <svg viewBox="0 0 24 24"><path d="M3 11 12 3l9 8v10h-6v-6H9v6H3z"/></svg>
+  </button>
+  <div class="title"><b id="title">GeoLab</b><span id="subtitle"></span></div>
+  <button class="icon" id="btn-menu" aria-label="Menu">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+  </button>
+</header>
+
+<div id="menu" class="menu" hidden>
+  <button data-act="open">Open file (.slab, .gsz)</button>
+  <button data-act="save">Save / share project</button>
+  <button data-act="report">Show report</button>
+  <button data-act="rename">Rename project</button>
+  <hr>
+  <div class="seg" id="theme-seg">
+    <span>Theme</span>
+    <button data-theme="auto">Auto</button><button data-theme="light">Day</button><button data-theme="dark">Night</button>
+  </div>
+  <hr>
+  <button data-act="about">About GeoLab</button>
+</div>
+
+<main id="app" hidden>
+  <section id="view">
+    <canvas id="cv"></canvas>
+    <div id="fos" hidden></div>
+    <div class="viewtools">
+      <button class="chip" id="btn-fit" aria-label="Fit to screen">Fit</button>
+    </div>
+    <div id="legend"></div>
+  </section>
+  <nav id="tabs">
+    <button data-tab="analysis" class="on">Analysis</button>
+    <button data-tab="materials">Materials</button>
+    <button data-tab="results">Results</button>
+  </nav>
+  <section id="panel"></section>
+</main>
+
+<section id="start" hidden>
+  <div class="hero">
+    <img src="icon.svg" alt="" width="56" height="56">
+    <div><h1>GeoLab Mobile</h1><p>Slope stability and seepage on your phone</p></div>
+  </div>
+  <div class="card">
+    <h2>Quick slope</h2>
+    <div class="grid2">
+      <label>Height (m)<input id="q-height" type="number" inputmode="decimal" value="10"></label>
+      <label>Slope (H : 1V)<input id="q-ratio" type="number" inputmode="decimal" value="2"></label>
+      <label>Crest width (m)<input id="q-crest" type="number" inputmode="decimal" value="20"></label>
+      <label>Toe width (m)<input id="q-toe" type="number" inputmode="decimal" value="20"></label>
+      <label>Depth below toe (m)<input id="q-base" type="number" inputmode="decimal" value="5"></label>
+      <label>Crest load (kPa)<input id="q-surcharge" type="number" inputmode="decimal" value="0"></label>
+    </div>
+    <label class="check"><input id="q-water-on" type="checkbox"> Water table <input id="q-water" type="number" inputmode="decimal" value="4"> m below the crest</label>
+    <h3>Soil layers <small>(top to bottom)</small></h3>
+    <div id="q-layers"></div>
+    <button class="ghost" id="q-add">+ Add layer</button>
+    <button class="primary" id="q-build">Build and solve</button>
+  </div>
+  <div class="card">
+    <h2>Examples</h2>
+    <div id="examples" class="list"></div>
+  </div>
+  <div class="card row">
+    <button class="ghost" id="start-open">Open a project file</button>
+    <button class="ghost" id="start-resume" hidden>Back to last project</button>
+  </div>
+  <p class="foot" id="foot"></p>
+</section>
+
+<div id="sheet" hidden>
+  <div class="sheet-box">
+    <div class="sheet-head"><b id="sheet-title"></b><button class="icon" id="sheet-close" aria-label="Close">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke-width="2.4" fill="none"/></svg></button></div>
+    <div id="sheet-body"></div>
+  </div>
+</div>
+<div id="busy" hidden><div class="spin"></div><span id="busy-msg">Solving...</span></div>
+<div id="toast" hidden></div>
+<input id="file" type="file" hidden>
+<script src="app.js"></script>
+</body>
+</html>

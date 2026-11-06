@@ -1,4 +1,4 @@
-"""StrataLab Assistant: a chat helper that can build and edit slope models.
+"""GeoLab Assistant: a chat helper that can build and edit slope models.
 
 It works with any AI service:
 
@@ -7,9 +7,9 @@ It works with any AI service:
 * ``compatible``  - any OpenAI-compatible server: Google Gemini, OpenRouter, DeepSeek, Groq, Mistral,
                     a local Ollama or LM Studio, ... (base URL, model and, if needed, a key)
 * ``claude_cli``  - your Claude account, through the Claude Code command line tool (``claude``)
-                    after you sign in to it once; no API key in StrataLab
+                    after you sign in to it once; no API key in GeoLab
 * ``codex_cli``   - your ChatGPT account, through the OpenAI Codex command line tool (``codex``)
-                    after you sign in to it once; no API key in StrataLab
+                    after you sign in to it once; no API key in GeoLab
 
 Every service is asked for the same JSON reply, ``{"reply": text, "actions": [...]}``. The actions
 are validated here, like user input, before they change anything.
@@ -58,7 +58,7 @@ REPLY_SCHEMA = {
     },
 }
 
-SYSTEM = """You are the StrataLab Assistant inside StrataLab, a 2D geotechnical analysis desktop app
+SYSTEM = """You are the GeoLab Assistant inside GeoLab, a 2D geotechnical analysis desktop app
 (slope stability by limit equilibrium, seepage, stress and more). You help an engineering student or
 engineer build and change slope stability models, run them and understand the results. Answer in
 the user's language (for example Bengali written in English letters if they write that way). Keep
@@ -394,7 +394,7 @@ def _call_openai_compatible(s: Settings, system: str, messages: list[dict]) -> s
     try:
         return data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as e:
-        raise AIError("The AI service sent an answer StrataLab could not read.") from e
+        raise AIError("The AI service sent an answer GeoLab could not read.") from e
 
 
 def _post_json(url, body, key, timeout):
@@ -442,7 +442,7 @@ def _call_cli(s: Settings, system: str, messages: list[dict]) -> str:
         raise AIError("Codex was not found. Install it (npm install -g @openai/codex), run 'codex' "
                       "once to sign in with your ChatGPT account, then try again.")
     prompt = _transcript(system, messages)
-    work = tempfile.mkdtemp(prefix="stratalab-ai-")
+    work = tempfile.mkdtemp(prefix="geolab-ai-")
     out_file = os.path.join(work, "answer.txt")
     if s.provider == "claude_cli":
         args = [exe, "-p", "--output-format", "text"]

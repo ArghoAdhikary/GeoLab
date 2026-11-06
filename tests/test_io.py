@@ -4,11 +4,11 @@ import sys
 
 import pytest
 
-from stratalab.examples import EXAMPLES, layered_slope_with_water
-from stratalab.fileio import export_results_csv, import_points_csv, load_project, save_project
-from stratalab.model import Project
-from stratalab.report import build_report
-from stratalab.solver import solve_all
+from geolab.examples import EXAMPLES, layered_slope_with_water
+from geolab.fileio import export_results_csv, import_points_csv, load_project, save_project
+from geolab.model import Project
+from geolab.report import build_report
+from geolab.solver import solve_all
 
 
 def test_roundtrip_with_results(tmp_path):
@@ -63,11 +63,11 @@ def test_report_mentions_key_results():
 
 
 def test_cli_solve(tmp_path):
-    from stratalab.examples import homogeneous_slope
+    from geolab.examples import homogeneous_slope
     f = tmp_path / "h.slab"
     save_project(homogeneous_slope(), f)
     pdf = tmp_path / "h.pdf"
-    r = subprocess.run([sys.executable, "-m", "stratalab", "solve", str(f), "--save", "--pdf", str(pdf)],
+    r = subprocess.run([sys.executable, "-m", "geolab", "solve", str(f), "--save", "--pdf", str(pdf)],
                        capture_output=True, text=True, timeout=300)
     assert r.returncode == 0, r.stderr
     assert "Critical factor of safety" in r.stdout

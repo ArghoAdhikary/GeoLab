@@ -1,4 +1,4 @@
-"""StrataLab Assistant chat: a round chat head in the bottom-right corner, a small chat box
+"""GeoLab Assistant chat: a round chat head in the bottom-right corner, a small chat box
 that opens from it, and a full side panel on the right.
 
 Modes: ``head`` (only the round button), ``popup`` (small chat box above the button) and
@@ -22,7 +22,7 @@ from .theme import is_dark, manager
 ACCENT = "#2f6fe0"
 HEAD_SIZE = 58
 MARGIN = 18
-GREETING = ("Hi! I am the StrataLab Assistant. Ask me to build a slope (\"10 m high clay slope with a water "
+GREETING = ("Hi! I am the GeoLab Assistant. Ask me to build a slope (\"10 m high clay slope with a water "
             "table\"), change the open model (\"raise the water 1 m\", \"make clay c' = 15\"), solve it, "
             "or explain a result.")
 
@@ -58,7 +58,7 @@ class ChatHead(QWidget):
         super().__init__(parent)
         self.setFixedSize(HEAD_SIZE + 8, HEAD_SIZE + 8)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("StrataLab Assistant (AI chat)")
+        self.setToolTip("GeoLab Assistant (AI chat)")
         self.unread = False
         self._hover = False
         self._icon = bubble_icon(28)
@@ -129,7 +129,7 @@ class ChatPanel(QWidget):
         h.addWidget(icon)
         col = QVBoxLayout()
         col.setSpacing(0)
-        self.title = QLabel("<b>StrataLab Assistant</b>")
+        self.title = QLabel("<b>GeoLab Assistant</b>")
         self.subtitle = QLabel("")
         self.subtitle.setObjectName("chatsub")
         col.addWidget(self.title)

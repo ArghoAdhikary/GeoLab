@@ -4,8 +4,8 @@ import math
 import numpy as np
 import pytest
 
-from stratalab.model import new_project
-from stratalab.seep import KELVIN, evaporation_ratio, run_seepage
+from geolab.model import new_project
+from geolab.seep import KELVIN, evaporation_ratio, run_seepage
 
 DAY = 86400.0
 

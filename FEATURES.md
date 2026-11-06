@@ -98,3 +98,12 @@ directly with another vendor's software.
 | `.gsz`: slope (SLOPE/W), seepage, dynamic, thermal, transport and air analyses on export; results | Export writes stress (in situ, consolidation) analyses only; the file layout of the others has not been seen in a real file yet. Results are not read. |
 | Code signing / notarization | Builds are unsigned. |
 | Live Claude API call | Tested with a fake client only. The AI builder sets up slope models. |
+
+## GeoLab Mobile (Android / iOS)
+
+| Feature | Verified by |
+|---|---|
+| Same engine on the phone (Pyodide 0.27.7, numpy, scipy, offline) | `test_mobile.py` (bridge, native Python); quick slope and earth-dam seepage + stability run in a phone-size browser |
+| Quick slope from height, ratio, widths, layers, water table, crest load; examples; open .slab/.gsz; save and share .slab | `test_mobile.py` |
+| Edit materials, method, pore water, kh, water table, crest load; solve one or all; FS by all methods; FE colour maps; report | `test_mobile.py`, browser check |
+| Android APK and iOS IPA built by GitHub Actions (Capacitor) | Actions run; not yet run on a real phone |

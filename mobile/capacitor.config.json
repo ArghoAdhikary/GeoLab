@@ -1,0 +1,8 @@
+{
+  "appId": "io.github.arghoadhikary.geolab",
+  "appName": "GeoLab",
+  "webDir": "www",
+  "backgroundColor": "#1d4e89",
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "never" }
+}

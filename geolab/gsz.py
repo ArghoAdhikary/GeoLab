@@ -17,7 +17,7 @@ from .model import MATERIAL_COLORS, Project, new_project
 GSZ_VERSION = "11.12"
 GSZ_APP = "25.2.1.39"
 
-# GeoStudio-style property names -> StrataLab Material attributes (matched case-insensitively)
+# GeoStudio-style property names -> GeoLab Material attributes (matched case-insensitively)
 MATERIAL_PROPS = {
     "unitweight": "unit_weight", "cohesion": "cohesion", "cohesionprime": "cohesion", "c": "cohesion",
     "phi": "phi", "phiprime": "phi", "phib": "phi_b", "ksat": "k_sat", "satkx": "k_sat", "kx": "k_sat",
@@ -173,7 +173,7 @@ def _analysis(p, el):
 
 
 def _bc_types(bc_el):
-    """StrataLab boundary types for one GeoStudio boundary definition: {physics: (type, value, extra)}."""
+    """GeoLab boundary types for one GeoStudio boundary definition: {physics: (type, value, extra)}."""
     out = {}
     hyd = bc_el.attrib.get("Hydraulic")
     if hyd:
@@ -268,7 +268,7 @@ def _slope_items(root, p, an_map):
                     st.mode = "entry_exit"
                     st.entry_x1, st.entry_x2 = entry_r
                     st.exit_x1, st.exit_x2 = exit_r
-                    # GeoStudio counts increments (gaps); StrataLab counts points
+                    # GeoStudio counts increments (gaps); GeoLab counts points
                     st.n_entry = int(entry_i or 8) + 1
                     st.n_exit = int(exit_i or 8) + 1
                     st.n_radius = int(_num(_text(ee, "RadiusInc")) or 4) + 1
@@ -420,7 +420,7 @@ SLOPE_METHOD_OUT = {"ordinary": "Ordinary", "bishop": "Bishop", "janbu": "Janbu"
 
 
 def _bc_attrs(bc):
-    """GeoStudio boundary definition attributes for a StrataLab boundary condition, or None."""
+    """GeoStudio boundary definition attributes for a GeoLab boundary condition, or None."""
     v = f"{bc.value:.12g}"
     t = bc.type
     if t == "fixed_x":

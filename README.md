@@ -1,6 +1,6 @@
-# StrataLab
+# GeoLab
 
-2D geotechnical analysis for Windows and macOS:
+2D geotechnical analysis for Windows, macOS, Android and iOS (formerly StrataLab):
 
 - **Slope stability** by limit equilibrium: 11 methods (Bishop, Spencer, Morgenstern-Price, Janbu,
   Corps of Engineers, Lowe-Karafiath, Sarma, ...) plus the finite element stress method; 10 strength
@@ -29,24 +29,46 @@ See [FEATURES.md](FEATURES.md) for exactly what is and isn't implemented, and ho
 ## Install
 
 ### Ready-made app
-Download `StrataLab-windows.zip` or `StrataLab-macos.zip` from the
-[Releases](https://github.com/ArghoAdhikary/StrataLab/releases) page
-(or the latest **Actions** run), unzip, and run `StrataLab.exe` / `StrataLab.app`.
-The builds are not code-signed: on Windows choose *More info > Run anyway*; on macOS right-click the
-app and choose *Open* the first time.
+From the [Releases](https://github.com/ArghoAdhikary/GeoLab/releases) page:
+
+| File | For |
+|---|---|
+| `GeoLab-Setup.exe` | Windows installer: Start menu and desktop shortcuts, opens `.slab` files, uninstall from Settings > Apps |
+| `GeoLab-windows-portable.zip` | Windows, nothing installed: unzip anywhere (also a USB stick) and run `GeoLab.exe`. Settings stay in `GeoLab.ini` beside it |
+| `GeoLab-macos.zip` | macOS: unzip and open `GeoLab.app` |
+| `GeoLab-android.apk` | Android phones and tablets (GeoLab Mobile) |
+| `GeoLab-ios-unsigned.ipa` | iPhone and iPad (GeoLab Mobile), unsigned: see below |
+
+The desktop builds are not code-signed: on Windows choose *More info > Run anyway*; on macOS right-click
+the app and choose *Open* the first time.
+
+### GeoLab Mobile (Android and iOS)
+The phone app runs the same Python analysis engine as the desktop app (through Pyodide, fully offline):
+build a slope from a few numbers (height, slope, layers, water table, crest load) or open an example
+or a `.slab` / `.gsz` file, edit materials, method, water table and seismic coefficient, solve, and see the
+critical slip surface, the factor of safety by every method, seepage and other finite element results
+as colour maps, and the full text report. Projects save and share as `.slab` files that open on the desktop.
+
+- **Android**: download `GeoLab-android.apk` on the phone, open it and allow *Install unknown apps* for
+  your browser or file manager when asked. Updates install over the old version.
+- **iOS**: Apple only allows apps from the App Store or signed with a developer account, so the `.ipa`
+  is unsigned. Install it with [AltStore](https://altstore.io) or [Sideloadly](https://sideloadly.io) using
+  your Apple ID (free accounts re-sign every 7 days), or sign it with your own Apple Developer account.
+- **Browser**: run `python mobile/build_web.py`, then `python -m http.server -d mobile/www` and open
+  http://localhost:8000 (Pyodide then loads from the internet).
 
 ### From source (any OS, Python 3.10+)
 ```bash
-git clone https://github.com/ArghoAdhikary/StrataLab.git
+git clone https://github.com/ArghoAdhikary/GeoLab.git
 ```
 ```bash
-cd StrataLab
+cd GeoLab
 ```
 ```bash
 pip install -r requirements.txt
 ```
 ```bash
-python -m stratalab
+python -m geolab
 ```
 
 ### Build the app yourself
@@ -56,7 +78,7 @@ pip install pyinstaller
 ```bash
 python build.py
 ```
-The result is `dist/StrataLab/StrataLab.exe` on Windows or `dist/StrataLab.app` on macOS.
+The result is `dist/GeoLab/GeoLab.exe` on Windows or `dist/GeoLab.app` on macOS.
 
 ## Using it
 
@@ -87,7 +109,7 @@ Turn it on or off and choose the AI in Edit > Preferences > AI Assistant:
 The chat has three sizes: the round chat head (minimised), a small chat box that opens from it, and a
 side panel on the right (expand button). The assistant sees a summary of the open model (materials,
 coordinates, water table, results). Its changes are checked like your own input, come as one undo
-step, and it never invents a factor of safety: it asks StrataLab to solve and reports the result.
+step, and it never invents a factor of safety: it asks GeoLab to solve and reports the result.
 
 ### AI Slope Builder
 Needs an Anthropic API key: paste it in the dialog (optionally remembered) or set `ANTHROPIC_API_KEY`.
@@ -96,9 +118,9 @@ before it becomes a project, and the model's assumptions are shown to you. Alway
 
 ### Command line
 ```bash
-stratalab solve project.slab --save --pdf report.pdf --csv slices.csv
+geolab solve project.slab --save --pdf report.pdf --csv slices.csv
 ```
-(or `python -m stratalab solve ...`). The report is printed to the terminal.
+(or `python -m geolab solve ...`). The report is printed to the terminal.
 
 ## File format
 `.slab` is a zip containing `manifest.json` and `project.json` (all geometry, materials, analyses and
@@ -115,17 +137,19 @@ On a machine without a display set `QT_QPA_PLATFORM=offscreen`. Code layout:
 
 | Path | Contents |
 |---|---|
-| `stratalab/model.py` | Project data model and serialization |
-| `stratalab/geometry.py` | Polygons, ground profile, validation |
-| `stratalab/slope.py` | Method of slices, GLE solver, searches, probability |
-| `stratalab/seep.py` | Mesh generator and FE seepage solver |
-| `stratalab/solver.py` | Runs analyses in parent/child order, pre-solve checks |
-| `stratalab/ai.py` | Claude integration |
-| `stratalab/ui/` | Qt main window, canvas, dialogs, rendering, PDF |
+| `geolab/model.py` | Project data model and serialization |
+| `geolab/geometry.py` | Polygons, ground profile, validation |
+| `geolab/slope.py` | Method of slices, GLE solver, searches, probability |
+| `geolab/seep.py` | Mesh generator and FE seepage solver |
+| `geolab/solver.py` | Runs analyses in parent/child order, pre-solve checks |
+| `geolab/ai.py` | Claude integration |
+| `geolab/ui/` | Qt main window, canvas, dialogs, rendering, PDF |
 | `tests/` | Benchmarks and unit/GUI tests |
 
-GitHub Actions (`.github/workflows/build.yml`) tests and builds on Windows and macOS for every push,
-and attaches the zipped apps to a GitHub release when you push a tag such as `v1.0.0`.
+GitHub Actions (`.github/workflows/build.yml`) tests and builds on Windows and macOS for every push.
+For a tag such as `v1.0.0` it also builds the Windows installer (Inno Setup, `installer/geolab.iss`),
+the portable zip, the Android APK and the iOS IPA (Capacitor project in `mobile/`), and attaches them
+all to the GitHub release.
 
 ## Validation
 Every solver is checked by automated tests against closed-form solutions or published benchmarks:

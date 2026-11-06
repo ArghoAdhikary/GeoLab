@@ -1,0 +1,5 @@
+GeoLab portable
+
+This file tells GeoLab to keep its settings (theme, AI assistant, recent files) in GeoLab.ini
+in this folder instead of in the Windows registry. Delete it to use normal settings.
+Nothing is installed: unzip anywhere (also a USB stick) and run GeoLab.exe.

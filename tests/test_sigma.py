@@ -4,9 +4,9 @@ import math
 import numpy as np
 import pytest
 
-from stratalab.model import new_project
-from stratalab.sigma import run_stress
-from stratalab.slope import run_slope
+from geolab.model import new_project
+from geolab.sigma import run_stress
+from geolab.slope import run_slope
 
 
 def block(w, h, kind="stress"):

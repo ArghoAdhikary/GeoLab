@@ -3,8 +3,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stratalab"
-version = "2.6.0"
+name = "geolab"
+version = "2.7.0"
 description = "2D geotechnical analysis: slope stability, seepage, stress-deformation, consolidation, earthquake, heat transfer, contaminant transport and air flow"
 readme = "README.md"
 license = { text = "MIT" }
@@ -15,10 +15,10 @@ dependencies = ["PySide6>=6.6", "numpy>=1.24", "scipy>=1.10", "anthropic>=0.80"]
 dev = ["pytest>=8", "pyinstaller>=6"]
 
 [project.scripts]
-stratalab = "stratalab.__main__:main"
+geolab = "geolab.__main__:main"
 
 [tool.setuptools]
-packages = ["stratalab", "stratalab.ui"]
+packages = ["geolab", "geolab.ui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

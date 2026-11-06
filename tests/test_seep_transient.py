@@ -4,8 +4,8 @@ import math
 import numpy as np
 import pytest
 
-from stratalab.model import new_project
-from stratalab.seep import relative_k, run_seepage, water_content
+from geolab.model import new_project
+from geolab.seep import relative_k, run_seepage, water_content
 
 
 def column(H=10.0, width=1.0):

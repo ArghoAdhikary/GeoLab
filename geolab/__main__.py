@@ -1,8 +1,8 @@
 """Entry point.
 
-    stratalab                       start the desktop app
-    stratalab project.slab          open a project in the app
-    stratalab solve project.slab    solve from the command line (batch), print the report
+    geolab                       start the desktop app
+    geolab project.slab          open a project in the app
+    geolab solve project.slab    solve from the command line (batch), print the report
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import sys
 
 
 def cli_solve(argv) -> int:
-    ap = argparse.ArgumentParser(prog="stratalab solve", description="Solve a StrataLab project without the GUI.")
+    ap = argparse.ArgumentParser(prog="geolab solve", description="Solve a GeoLab project without the GUI.")
     ap.add_argument("file")
     ap.add_argument("--analysis", help="name of one analysis to solve (default: all)")
     ap.add_argument("--save", action="store_true", help="write results back into the project file")
@@ -54,7 +54,7 @@ def cli_solve(argv) -> int:
     if args.pdf:
         import os
         from PySide6.QtWidgets import QApplication
-        qt_args = ["stratalab"]
+        qt_args = ["geolab"]
         if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
             qt_args += ["-platform", "offscreen"]   # headless Linux; Windows/macOS use the native platform (fonts)
         app = QApplication.instance() or QApplication(qt_args)
@@ -87,7 +87,7 @@ def run_gui(argv) -> int:
     from . import APP_NAME
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setOrganizationName("StrataLab")
+    app.setOrganizationName("GeoLab")
     app.setStyle("Fusion")
     app.setWindowIcon(make_icon())
     from .ui.main_window import MainWindow

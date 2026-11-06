@@ -6,12 +6,12 @@ import pytest
 from scipy.optimize import brentq
 from scipy.special import erf, erfc
 
-from stratalab.air import run_air
-from stratalab.model import new_project
-from stratalab.quake import newmark_block, run_dynamic
-from stratalab.seep import run_seepage
-from stratalab.thermal import run_thermal
-from stratalab.transport import run_transport
+from geolab.air import run_air
+from geolab.model import new_project
+from geolab.quake import newmark_block, run_dynamic
+from geolab.seep import run_seepage
+from geolab.thermal import run_thermal
+from geolab.transport import run_transport
 
 
 def strip(L, W, kind):

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.7.0 - 2026-11-06
+
+- The app is now called **GeoLab** (was StrataLab). Project files keep the .slab extension, and old StrataLab settings are copied over on first start.
+- Windows installer (GeoLab-Setup.exe) and portable version (GeoLab-windows-portable.zip, settings kept next to the program).
+- GeoLab Mobile for Android (.apk) and iOS (.ipa): the same analysis engine running on the phone.
+
 ## 2.6.0 - 2026-11-06
 
 - AI Assistant chat. A round chat head sits in the bottom-right corner; clicking it opens a small chat

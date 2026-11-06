@@ -68,11 +68,27 @@ class SolveWorker(QThread):
 _EXTRA_WINDOWS: list = []        # windows opened by the AI assistant (kept alive)
 
 
+def _app_settings():
+    """Settings for this computer. A portable build (portable.txt next to the program) keeps them in
+    GeoLab.ini beside the program; otherwise settings from the old StrataLab name are copied over once."""
+    import sys
+    exe_dir = Path(sys.executable).parent
+    if getattr(sys, "frozen", False) and (exe_dir / "portable.txt").exists():
+        return QSettings(str(exe_dir / "GeoLab.ini"), QSettings.IniFormat)
+    s = QSettings("GeoLab", "GeoLab")
+    if not s.allKeys():
+        old = QSettings("StrataLab", "StrataLab")
+        for k in old.allKeys():
+            s.setValue(k, old.value(k))
+        s.setValue("migrated_from_stratalab", True)
+    return s
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._icon_actions = []    # (action, tool icon name), redrawn when the theme changes
-        self.settings = QSettings("StrataLab", "StrataLab")
+        self.settings = _app_settings()
         self.project: Project = new_project()
         self.path: Path | None = None
         self.dirty = False
@@ -1628,7 +1644,7 @@ class MainWindow(QMainWindow):
         elif action in ("docs", "issues"):
             from PySide6.QtCore import QUrl
             from PySide6.QtGui import QDesktopServices
-            QDesktopServices.openUrl(QUrl("https://github.com/ArghoAdhikary/StrataLab" +
+            QDesktopServices.openUrl(QUrl("https://github.com/ArghoAdhikary/GeoLab" +
                                           ("/issues" if action == "issues" else "#readme")))
 
     # -- appearance and AI assistant ------------------------------------------
@@ -1708,7 +1724,7 @@ class TextEditDialog(QDialog):
         return self.edit.toPlainText()
 
 
-GUIDE = """StrataLab quick guide
+GUIDE = """GeoLab quick guide
 
 1. Define the problem
    - File > New Project: pick the first analysis type (slope, seepage, stress, dynamic, thermal,

@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from stratalab.examples import earth_dam
-from stratalab.model import new_project
-from stratalab.seep import generate_mesh, pressure_head_interpolator, run_seepage
-from stratalab.solver import solve_all
+from geolab.examples import earth_dam
+from geolab.model import new_project
+from geolab.seep import generate_mesh, pressure_head_interpolator, run_seepage
+from geolab.solver import solve_all
 
 
 def box(w, h, k=1e-5, alpha=10.0):
@@ -104,6 +104,6 @@ def test_earth_dam_seepage_feeds_stability():
     assert abs(seep.results["inflow"] - seep.results["outflow"]) / seep.results["inflow"] < 1e-6
     F_wet = slope.results["critical"]["fos"]
     slope.pwp = "none"
-    from stratalab.slope import run_slope
+    from geolab.slope import run_slope
     F_dry = run_slope(p, slope)["critical"]["fos"]
     assert F_wet < F_dry

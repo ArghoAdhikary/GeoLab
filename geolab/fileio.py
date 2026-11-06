@@ -1,4 +1,4 @@
-"""Reading and writing StrataLab project files (.slab) and exports."""
+"""Reading and writing GeoLab project files (.slab) and exports."""
 from __future__ import annotations
 
 import csv
@@ -16,7 +16,7 @@ def save_project(project: Project, path, include_results: bool = True):
     """A .slab file is a zip archive holding project.json (and a small manifest)."""
     path = Path(path)
     data = project.to_dict(include_results=include_results)
-    manifest = {"app": "StrataLab", "app_version": __version__, "format_version": FORMAT_VERSION}
+    manifest = {"app": "GeoLab", "app_version": __version__, "format_version": FORMAT_VERSION}
     tmp = path.with_suffix(path.suffix + ".tmp")
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(manifest, indent=2))
@@ -37,10 +37,10 @@ def load_project(path) -> Project:
         with zipfile.ZipFile(path) as z:
             manifest = json.loads(z.read("manifest.json"))
             if manifest.get("format_version", 0) > FORMAT_VERSION:
-                raise ValueError("This file was created by a newer version of StrataLab.")
+                raise ValueError("This file was created by a newer version of GeoLab.")
             data = json.loads(z.read("project.json"))
     except zipfile.BadZipFile as e:
-        raise ValueError(f"{path.name} is not a valid StrataLab project file.") from e
+        raise ValueError(f"{path.name} is not a valid GeoLab project file.") from e
     except KeyError as e:
         raise ValueError(f"{path.name} is missing {e.args[0]}.") from e
     return Project.from_dict(data)

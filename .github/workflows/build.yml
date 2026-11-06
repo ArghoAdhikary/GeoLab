@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  desktop:
     strategy:
       fail-fast: false
       matrix:
@@ -32,19 +32,132 @@ jobs:
         run: python -m pytest -q
       - name: Build app
         run: python build.py
-      - name: Package (Windows)
+      - name: Package (Windows installer + portable)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path dist/StrataLab -DestinationPath StrataLab-windows.zip
+        run: |
+          $ver = python -c "import geolab; print(geolab.__version__)"
+          New-Item -ItemType Directory -Force release, stage | Out-Null
+          Copy-Item dist/GeoLab stage/GeoLab -Recurse
+          Copy-Item installer/portable.txt stage/GeoLab/portable.txt
+          Compress-Archive -Path stage/GeoLab -DestinationPath release/GeoLab-windows-portable.zip
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=$ver" installer/geolab.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem release
       - name: Package (macOS)
         if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent dist/StrataLab.app StrataLab-macos.zip
+        run: |
+          mkdir -p release
+          ditto -c -k --sequesterRsrc --keepParent dist/GeoLab.app release/GeoLab-macos.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: StrataLab-${{ runner.os }}
-          path: StrataLab-*.zip
+          name: GeoLab-${{ runner.os }}
+          path: release/*
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: StrataLab-*.zip
+          files: release/*
+
+  android:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Web files with Pyodide, numpy and scipy (offline)
+        run: python mobile/build_web.py --bundle
+      - name: Android project
+        working-directory: mobile
+        run: |
+          npm install --no-audit --no-fund
+          npx cap add android
+          npx capacitor-assets generate --android || echo "icon generation skipped"
+          npx cap sync android
+          VER=$(cd .. && python -c "import geolab; print(geolab.__version__)")
+          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"$VER\"/" android/app/build.gradle
+          grep -E "versionCode|versionName" android/app/build.gradle
+      - name: Build APK
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p release
+          cd mobile/android
+          chmod +x gradlew
+          if [ -n "$KS" ]; then
+            ./gradlew assembleRelease --no-daemon -q
+            BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+            "$BT/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk /tmp/aligned.apk
+            echo "$KS" | base64 -d > /tmp/ks.p12
+            "$BT/apksigner" sign --ks /tmp/ks.p12 --ks-type PKCS12 --ks-pass env:KS_PASS --ks-key-alias geolab \
+              --out ../../release/GeoLab-android.apk /tmp/aligned.apk
+            rm -f /tmp/ks.p12
+            "$BT/apksigner" verify ../../release/GeoLab-android.apk
+          else
+            ./gradlew assembleDebug --no-daemon -q
+            cp app/build/outputs/apk/debug/app-debug.apk ../../release/GeoLab-android.apk
+          fi
+          ls -la ../../release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GeoLab-Android
+          path: release/*
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+
+  ios:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Web files with Pyodide, numpy and scipy (offline)
+        run: python mobile/build_web.py --bundle
+      - name: iOS project
+        working-directory: mobile
+        run: |
+          npm install --no-audit --no-fund
+          npx cap add ios
+          npx capacitor-assets generate --ios || echo "icon generation skipped"
+          npx cap sync ios
+          VER=$(cd .. && python -c "import geolab; print(geolab.__version__)")
+          sed -i '' -E "s/MARKETING_VERSION = [^;]+;/MARKETING_VERSION = $VER;/; s/CURRENT_PROJECT_VERSION = [^;]+;/CURRENT_PROJECT_VERSION = ${{ github.run_number }};/" ios/App/App.xcodeproj/project.pbxproj
+      - name: Build unsigned IPA
+        working-directory: mobile
+        run: |
+          if [ -d ios/App/App.xcworkspace ]; then T="-workspace ios/App/App.xcworkspace"; else T="-project ios/App/App.xcodeproj"; fi
+          xcodebuild $T -scheme App -configuration Release -sdk iphoneos -destination generic/platform=iOS \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build -quiet
+          mkdir -p Payload ../release
+          cp -R build/Build/Products/Release-iphoneos/App.app Payload/GeoLab.app
+          zip -qry ../release/GeoLab-ios-unsigned.ipa Payload
+          ls -la ../release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GeoLab-iOS
+          path: release/*
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*

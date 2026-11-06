@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from stratalab.ai import MODEL, AIError, generate_project, project_from_ai
-from stratalab.slope import run_slope
+from geolab.ai import MODEL, AIError, generate_project, project_from_ai
+from geolab.slope import run_slope
 
 GOOD = {
     "title": "Cut slope", "description": "test", "units": "metric",

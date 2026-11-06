@@ -27,7 +27,7 @@ HELP = {
                   "Groq, Mistral, or a model running on this computer with Ollama or LM Studio. "
                   "Pick a preset or type the server address, then the model name.",
     "claude_cli": "Uses your Claude account (Pro / Max) with no API key: install Claude Code, run "
-                  "'claude' once in a terminal and sign in. StrataLab then talks to it directly.",
+                  "'claude' once in a terminal and sign in. GeoLab then talks to it directly.",
     "codex_cli": "Uses your ChatGPT account (Plus / Pro) with no API key: install Codex "
                  "(npm install -g @openai/codex), run 'codex' once in a terminal and sign in.",
 }
@@ -148,7 +148,7 @@ class PreferencesDialog(QDialog):
         v.addWidget(self.test_result)
         privacy = QLabel("The assistant sends your message and a summary of the open model (materials, "
                          "coordinates, water table, results) to the AI service you choose. Keys are kept "
-                         "in this computer's StrataLab settings.")
+                         "in this computer's GeoLab settings.")
         privacy.setWordWrap(True)
         privacy.setEnabled(False)
         v.addWidget(privacy)

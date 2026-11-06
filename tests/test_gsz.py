@@ -3,9 +3,9 @@ import zipfile
 
 import pytest
 
-from stratalab.examples import layered_slope_with_water
-from stratalab.fileio import load_project
-from stratalab.gsz import read_gsz, write_gsz
+from geolab.examples import layered_slope_with_water
+from geolab.fileio import load_project
+from geolab.gsz import read_gsz, write_gsz
 
 # same structure as a file saved by GeoStudio 2025.2 (geometry only)
 SAMPLE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -58,7 +58,7 @@ def test_import_without_materials_and_clockwise_region(tmp_path):
     xml = xml[:xml.index("<Materials")] + "</GSIData>"
     p = load_project(make_gsz(tmp_path / "geom.gsz", xml))
     assert len(p.materials) == 1 and all(r.material_id == p.materials[0].id for r in p.regions)
-    from stratalab.geometry import polygon_area
+    from geolab.geometry import polygon_area
     assert all(polygon_area(r.points) > 0 for r in p.regions)
 
 
@@ -153,7 +153,7 @@ def test_import_full_project(tmp_path):
         assert by[("pressure", seg)].value == 50 and by[("pressure", seg)].analyses == [con.id]
     assert by[("fixed_xy", ((0, 0), (20, 0)))].analyses == []                       # used by both analyses
     assert by[("pressure_head", ((10, 5), (10, 1)))].analyses == [con.id]           # interior drain
-    from stratalab.solver import verify
+    from geolab.solver import verify
     assert verify(p, con) == []
 
 
@@ -171,7 +171,7 @@ def test_full_project_export_round_trip(tmp_path):
 
 def test_imported_consolidation_solves(tmp_path):
     p = read_gsz(make_gsz(tmp_path / "full.gsz", FULL))
-    from stratalab.solver import solve
+    from geolab.solver import solve
     for a in p.analyses:
         a.mesh_size = 0.5
     r = solve(p, p.analyses[1])
@@ -225,7 +225,7 @@ def test_import_slope_project_and_solve(tmp_path):
         ("entry_exit", 32, 46, 3, 15, 9, 9)
     names = {m.id: m.name for m in p.materials}
     assert [names[r.material_id] for r in p.regions] == ["clay", "sand"]
-    from stratalab.solver import solve
+    from geolab.solver import solve
     crit = solve(p, a)["critical"]
     # GeoStudio 2026.1 (SLOPE/W, Morgenstern-Price) gives 1.225 for this model: circle centre
     # (8.0, 41.35), R 32.1, entering the crest at x = 32 and leaving at the toe x = 15

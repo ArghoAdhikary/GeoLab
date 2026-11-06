@@ -1,4 +1,4 @@
-"""AI slope builder: turns a plain-language description into a StrataLab project using Claude.
+"""AI slope builder: turns a plain-language description into a GeoLab project using Claude.
 
 The API key is read from the ANTHROPIC_API_KEY environment variable or passed in
 from the app's settings. The model reply is constrained to a JSON schema and then

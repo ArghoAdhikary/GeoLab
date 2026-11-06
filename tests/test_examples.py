@@ -1,8 +1,8 @@
 """Every built-in example solves, and independent methods agree with each other."""
 import pytest
 
-from stratalab.examples import EXAMPLES, slope_fe_stress
-from stratalab.solver import solve_all, verify
+from geolab.examples import EXAMPLES, slope_fe_stress
+from geolab.solver import solve_all, verify
 
 
 @pytest.mark.parametrize("name", list(EXAMPLES))

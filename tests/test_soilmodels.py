@@ -4,9 +4,9 @@ import math
 import numpy as np
 import pytest
 
-from stratalab.model import new_project
-from stratalab.sigma import run_stress
-from stratalab.soilmodels import hyperbolic_integrate, mcc_integrate, p_q
+from geolab.model import new_project
+from geolab.sigma import run_stress
+from geolab.soilmodels import hyperbolic_integrate, mcc_integrate, p_q
 
 LAM, KAP, NU, PHI = 0.20, 0.04, 0.3, 25.0
 M = 6 * math.sin(math.radians(PHI)) / (3 - math.sin(math.radians(PHI)))

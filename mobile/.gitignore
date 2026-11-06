@@ -1,0 +1,6 @@
+www/geolab.zip
+www/pyodide/
+node_modules/
+android/
+ios/
+package-lock.json

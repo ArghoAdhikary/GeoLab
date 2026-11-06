@@ -8,7 +8,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from stratalab.solver import solve_all
+from geolab.solver import solve_all
 
 
 @pytest.fixture(scope="module")
@@ -21,7 +21,7 @@ def win(app, tmp_path, monkeypatch):
     from PySide6.QtCore import QSettings
     QSettings.setDefaultFormat(QSettings.IniFormat)
     QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(tmp_path))
-    from stratalab.ui import main_window
+    from geolab.ui import main_window
     ini = str(tmp_path / "settings.ini")
     monkeypatch.setattr(main_window, "QSettings", lambda *a, **k: QSettings(ini, QSettings.IniFormat))
     w = main_window.MainWindow()
@@ -55,8 +55,8 @@ def test_draw_region_with_mouse_and_undo(win, app):
 
 
 def test_entry_exit_by_mouse_then_solve_and_export(win, app, tmp_path, monkeypatch):
-    from stratalab.examples import homogeneous_slope
-    from stratalab.ui import main_window
+    from geolab.examples import homogeneous_slope
+    from geolab.ui import main_window
     shown = []
     monkeypatch.setattr(main_window.EntryExitDialog, "exec", lambda self: shown.append(self) or 1)
     win.set_project(homogeneous_slope())
@@ -72,14 +72,14 @@ def test_entry_exit_by_mouse_then_solve_and_export(win, app, tmp_path, monkeypat
     assert win.view_mode == "results"
     img = win.render_image(800, 500)
     assert not img.isNull()
-    from stratalab.ui.pdf import export_pdf
+    from geolab.ui.pdf import export_pdf
     pdf = tmp_path / "out.pdf"
     export_pdf(pdf, win.project, win.project.analyses[0])
     assert pdf.read_bytes()[:4] == b"%PDF" and pdf.stat().st_size > 10000
 
 
 def test_assign_material_and_delete_region(win, app):
-    from stratalab.examples import layered_slope_with_water
+    from geolab.examples import layered_slope_with_water
     win.set_project(layered_slope_with_water())
     c = win.canvas
     target = win.project.materials[1].id
@@ -95,8 +95,8 @@ def test_assign_material_and_delete_region(win, app):
 
 
 def test_materials_dialog_validates(app):
-    from stratalab.examples import homogeneous_slope
-    from stratalab.ui.dialogs import MaterialsDialog
+    from geolab.examples import homogeneous_slope
+    from geolab.ui.dialogs import MaterialsDialog
     p = homogeneous_slope()
     d = MaterialsDialog(p)
     d.add()
@@ -119,8 +119,8 @@ def test_materials_dialog_validates(app):
                                   "Reservoir drawdown (transient)", "Contaminant plume (transport)",
                                   "Earthquake + Newmark displacement"])
 def test_results_view_for_every_analysis_type(win, app, name):
-    from stratalab.examples import EXAMPLES
-    from stratalab.ui.render import project_bounds
+    from geolab.examples import EXAMPLES
+    from geolab.ui.render import project_bounds
     win.set_project(EXAMPLES[name]())
     solve_all(win.project)
     for a in win.project.analyses:
@@ -143,8 +143,8 @@ def test_results_view_for_every_analysis_type(win, app, name):
 
 def test_analysis_dialog_for_every_kind(app, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
-    from stratalab.model import ANALYSIS_KINDS, new_project
-    from stratalab.ui.dialogs import AnalysisDialog
+    from geolab.model import ANALYSIS_KINDS, new_project
+    from geolab.ui.dialogs import AnalysisDialog
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[2]))
     for kind in ANALYSIS_KINDS:
@@ -163,7 +163,7 @@ def test_analysis_dialog_for_every_kind(app, monkeypatch):
 
 
 def test_save_open_roundtrip_through_window(win, tmp_path):
-    from stratalab.examples import earth_dam
+    from geolab.examples import earth_dam
     win.set_project(earth_dam())
     win.path = tmp_path / "dam.slab"
     assert win.save()

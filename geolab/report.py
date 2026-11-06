@@ -15,7 +15,7 @@ def _f(v, nd=3):
 def build_report(project, analysis) -> str:
     u = project.unit
     L = []
-    L.append(f"StrataLab {__version__} report  -  {datetime.datetime.now():%Y-%m-%d %H:%M}")
+    L.append(f"GeoLab {__version__} report  -  {datetime.datetime.now():%Y-%m-%d %H:%M}")
     L.append("=" * 72)
     L.append(f"Project:  {project.title}")
     if project.author:
