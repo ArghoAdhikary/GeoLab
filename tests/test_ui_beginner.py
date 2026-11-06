@@ -48,7 +48,7 @@ def test_step_guide_follows_the_work(win, app):
 
 def test_quick_slope_dialog_builds_a_layered_slope(win, app, monkeypatch):
     from geolab.ui.guide import QuickSlopeDialog
-    d = QuickSlopeDialog(win, "metric")
+    d = QuickSlopeDialog(None, "metric")
     d.height.setValue(8)
     d.water_on.setChecked(True)
     d.water.setValue(3)
@@ -61,6 +61,8 @@ def test_quick_slope_dialog_builds_a_layered_slope(win, app, monkeypatch):
     d.exec = lambda: True
     win.quick_slope()
     assert win.project is p
+    import shiboken6
+    shiboken6.delete(d)
 
 
 def test_draw_a_wall_and_set_a_stage(win, app, monkeypatch):
@@ -75,8 +77,10 @@ def test_draw_a_wall_and_set_a_stage(win, app, monkeypatch):
     ed.stage_list.item(1).setCheckState(Qt.Unchecked)
     a = ed.build()
     assert sorted(a.inactive_regions) == sorted([p.regions[0].id, p.regions[1].id])
+    import shiboken6
+    shiboken6.delete(ed)              # a parentless editor must not outlive QApplication
     # draw a new geogrid with the mouse
-    d = StructureDialog(None, win, p.unit, p)
+    d = StructureDialog(None, None, p.unit, p)
     d.form.w["type"].setCurrentIndex(d.form.w["type"].findData("geogrid"))
     d.try_accept()
     monkeypatch.setattr("geolab.ui.main_window.StructureDialog", lambda *a, **k: d)
@@ -93,18 +97,22 @@ def test_draw_a_wall_and_set_a_stage(win, app, monkeypatch):
     # the drawing (with the stage hatching and structures) renders without errors
     win.refresh_all()
     win.canvas.grab()
+    shiboken6.delete(d)
+
 
 
 def test_project_dialog_converts_units(win, app):
     from geolab.examples import EXAMPLES
     from geolab.ui.dialogs import ProjectDialog
     win.set_project(EXAMPLES["Homogeneous slope (benchmark)"]())
-    d = ProjectDialog(win.project, win)
+    d = ProjectDialog(win.project, None)
     d.units.setCurrentIndex(d.units.findData("imperial"))
     d.apply()
     assert win.project.units == "imperial"
     assert win.project.regions[0].points[1][0] == pytest.approx(70 * 3.280839895)
     assert d.not_converted
+    import shiboken6
+    shiboken6.delete(d)
 
 
 def test_material_and_bc_dialogs_have_the_new_fields(win, app):
@@ -112,6 +120,8 @@ def test_material_and_bc_dialogs_have_the_new_fields(win, app):
     keys = {f[0] for _, spec in MATERIAL_TABS for f in spec}
     assert {"hs_E50", "hs_Eur", "hs_m", "hs_pref", "hs_Rf", "cr", "phi_r"} <= keys
     assert any(f[0] == "rapid_drawdown" for _, spec in SLOPE_EXTRA for f in spec)
-    d = BCDialog("Grass", "climate", 0.0, win, kinds=["hydraulic"], value3=3e-8, root_depth=0.5)
+    d = BCDialog("Grass", "climate", 0.0, None, kinds=["hydraulic"], value3=3e-8, root_depth=0.5)
     pr = d.params()
     assert pr["value3"] == pytest.approx(3e-8) and pr["root_depth"] == 0.5
+    import shiboken6
+    shiboken6.delete(d)

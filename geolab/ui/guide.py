@@ -89,8 +89,9 @@ class StepBar(QFrame):
         self.buttons = []
 
     def update_steps(self, project, analysis):
-        for b in self.buttons:
-            b.setParent(None)
+        for b in self.buttons:               # Qt keeps ownership: no Python-side delete racing deleteLater
+            self.row.removeWidget(b)
+            b.hide()
             b.deleteLater()
         self.buttons = []
         steps = steps_for(project, analysis)
@@ -213,7 +214,9 @@ class QuickSlopeDialog(QDialog):
         if len(self.rows) <= 1:
             return
         for wd in self.rows.pop():
-            wd.setParent(None)
+            self.grid.removeWidget(wd)
+            wd.hide()
+            wd.deleteLater()
         self._thickness_state()
 
     def _thickness_state(self):
