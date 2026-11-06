@@ -5,6 +5,11 @@
   pressure-dependent elastic bulk modulus K = (1 + e) p' / kappa.
 * Duncan-Chang hyperbolic (Duncan & Chang 1970): tangent modulus
   Et = (1 - Rf SL)^2 K pa (sigma3 / pa)^n, unload-reload modulus Kur pa (sigma3 / pa)^n.
+* Hardening Soil (after Schanz, Vermeer & Bonnier 1999, shear hardening part): stress-dependent
+  stiffness E50 = E50_ref ((c cos phi + sigma3 sin phi) / (c cos phi + p_ref sin phi))^m, hyperbolic
+  stress-strain curve with failure ratio Rf (initial modulus 2 E50 / (2 - Rf)), unload-reload modulus
+  Eur with the same stress dependency, and the Mohr-Coulomb failure surface as the limit. The cap
+  (volumetric hardening) is not included.
 * Mohr-Coulomb elastic-perfectly plastic (cutting-plane return), linear elastic.
 
 Stresses are effective, tension positive, components [sx, sy, txy, sz] (plane strain).
@@ -19,11 +24,26 @@ import math
 import numpy as np
 from scipy.sparse.linalg import splu
 
-from .sigma import M_VEC, elastic_D, mc_function, mc_gradient
+from .sigma import M_VEC, mc_function, mc_gradient
 
-LINEAR, MOHR, CAMCLAY, HYPERBOLIC, VOID = 0, 1, 2, 3, 4
-NONLINEAR_MODELS = ("cam_clay", "hyperbolic")
+LINEAR, MOHR, CAMCLAY, HYPERBOLIC, VOID, HARDENING = 0, 1, 2, 3, 4, 5
+NONLINEAR_MODELS = ("cam_clay", "hyperbolic", "hardening_soil")
 P_MIN = 1.0               # smallest mean effective stress used for stiffness (pressure units)
+
+
+def elastic_D_vec(E, nu):
+    """Plane-strain elastic matrices (n x 4 x 4) for arrays of E and nu."""
+    E = np.asarray(E, float)
+    nu = np.asarray(nu, float)
+    f = E / ((1 + nu) * (1 - 2 * nu))
+    D = np.zeros((len(E), 4, 4))
+    a, b = f * (1 - nu), f * nu
+    for i, j in ((0, 0), (1, 1), (3, 3)):
+        D[:, i, j] = a
+    for i, j in ((0, 1), (1, 0), (0, 3), (3, 0), (1, 3), (3, 1)):
+        D[:, i, j] = b
+    D[:, 2, 2] = f * (1 - 2 * nu) / 2
+    return D
 
 
 def D_from_KG(K, G):
@@ -155,10 +175,46 @@ def hyperbolic_integrate(s, slmax, deps, mat, nsub=None):
     d = deps / nsub
     for _ in range(nsub):
         Et, sl = hyperbolic_Et(s, slmax, mat)
-        D = np.stack([elastic_D(E, n) for E, n in zip(Et, mat["nu"])]) if len(Et) else np.zeros((0, 4, 4))
+        D = elastic_D_vec(Et, mat["nu"])
         s = s + np.einsum("nij,nj->ni", D, d)
         slmax = np.maximum(slmax, sl)
     _, sl = hyperbolic_Et(s, slmax, mat)
+    return s, np.maximum(slmax, sl)
+
+
+def hs_E(s, slmax, mat):
+    """Hardening Soil: tangent (or unload-reload) modulus and stress level at stresses s."""
+    smax, smin = _principal(s)
+    s1, s3 = -smin, np.maximum(-smax, 0.0)              # compression positive
+    sphi, cphi = np.sin(np.radians(mat["phi"])), np.cos(np.radians(mat["phi"]))
+    ref = np.maximum(mat["c"] * cphi + mat["pref"] * sphi, 1e-6)
+    ratio = np.maximum((mat["c"] * cphi + s3 * sphi) / ref, 0.01)
+    E50 = mat["E50"] * ratio ** mat["m"]
+    Eur = mat["Eur"] * ratio ** mat["m"]
+    qf = (2 * mat["c"] * cphi + 2 * s3 * sphi) / np.maximum(1 - sphi, 1e-6)
+    sl = np.clip((s1 - s3) / np.maximum(qf, 1e-9), 0.0, 0.99)
+    Ei = 2 * E50 / (2 - mat["Rf"])
+    Et = Ei * (1 - mat["Rf"] * sl) ** 2
+    unloading = sl < 0.98 * slmax
+    return np.where(unloading, Eur, np.maximum(Et, 1e-3 * Ei)), sl
+
+
+def hs_integrate(s, slmax, deps, mat, nsub=None):
+    """Sub-stepped Hardening Soil integration with a Mohr-Coulomb limit."""
+    s, slmax = s.copy(), slmax.copy()
+    if nsub is None:
+        nsub = int(np.clip(np.ceil(np.abs(deps).max() / 2e-4), 1, 200)) if deps.size else 1
+    d = deps / nsub
+    sphi = np.sin(np.radians(mat["phi"]))
+    cphi = np.cos(np.radians(mat["phi"]))
+    spsi = np.sin(np.radians(mat["psi"]))
+    cpsi = np.cos(np.radians(mat["psi"]))
+    for _ in range(nsub):
+        Et, sl = hs_E(s, slmax, mat)
+        D = elastic_D_vec(Et, mat["nu"])
+        s = mc_integrate(s, d, D, mat["c"], sphi, cphi, spsi, cpsi)
+        slmax = np.maximum(slmax, sl)
+    _, sl = hs_E(s, slmax, mat)
     return s, np.maximum(slmax, sl)
 
 
@@ -188,7 +244,11 @@ class Constitutive:
         ngp = mesh.ngp
         kind = np.array([VOID if m.stress_model == "none" else CAMCLAY if m.stress_model == "cam_clay" else
                          HYPERBOLIC if m.stress_model == "hyperbolic" else
+                         HARDENING if m.stress_model == "hardening_soil" else
                          MOHR if m.stress_model == "elastic_plastic" else LINEAR for m in ml])
+        inactive = getattr(model, "inactive", None)
+        if inactive is not None:
+            kind = np.where(inactive, VOID, kind)
         self.kind = np.repeat(kind, ngp)
         rep = lambda vals: np.repeat(np.asarray(vals, float), ngp)
         self.nu = rep([min(m.nu, 0.49) for m in ml])
@@ -197,6 +257,10 @@ class Constitutive:
         self.hmat = {"K": rep([m.dc_K for m in ml]), "Kur": rep([m.dc_Kur for m in ml]), "n": rep([m.dc_n for m in ml]),
                      "Rf": rep([m.dc_Rf for m in ml]), "c": rep([m.cohesion for m in ml]), "phi": rep([m.phi for m in ml]),
                      "nu": self.nu, "pa": rep([101.325 if project.units == "metric" else 2116.2] * len(ml))}
+        self.hsmat = {"E50": rep([m.hs_E50 for m in ml]), "Eur": rep([m.hs_Eur for m in ml]),
+                      "m": rep([m.hs_m for m in ml]), "pref": rep([m.hs_pref for m in ml]),
+                      "Rf": rep([m.hs_Rf for m in ml]), "c": rep([m.cohesion for m in ml]),
+                      "phi": rep([m.phi for m in ml]), "psi": rep([min(m.psi, m.phi) for m in ml]), "nu": self.nu}
         self.D_el = np.repeat(model.D, ngp, axis=0)
         self.c = model.c_gp.ravel()
         self.sphi, self.cphi = np.repeat(model.sphi, ngp), np.repeat(model.cphi, ngp)
@@ -233,6 +297,10 @@ class Constitutive:
         if m.any():
             hm = {key: v[m] for key, v in self.hmat.items()}
             s[m], slmax[m] = hyperbolic_integrate(self.s[m], self.slmax[m], deps[m], hm)
+        m = k == HARDENING
+        if m.any():
+            hm = {key: v[m] for key, v in self.hsmat.items()}
+            s[m], slmax[m] = hs_integrate(self.s[m], self.slmax[m], deps[m], hm)
         return s, (pc, e, slmax)
 
     def commit(self, s, state):
@@ -270,62 +338,100 @@ class Constitutive:
         if m.any():
             hm = {key: v[m] for key, v in self.hmat.items()}
             Et, _ = hyperbolic_Et(s[m], slmax[m], hm)
-            D[m] = np.stack([elastic_D(E, n) for E, n in zip(Et, self.nu[m])])
+            D[m] = elastic_D_vec(Et, self.nu[m])
+        m = self.kind == HARDENING
+        if m.any():
+            hm = {key: v[m] for key, v in self.hsmat.items()}
+            Et, _ = hs_E(s[m], slmax[m], hm)
+            D[m] = elastic_D_vec(Et, self.nu[m])
         return D
 
 
 def solve_nonlinear(mesh, model, cons: Constitutive, fixed, F_total, uc_total, steps, u_gp,
-                    max_iter=60, tol=1e-3, progress=None, cancel=None):
-    """Load-controlled modified Newton solution. Returns (u, sig, history, converged)."""
+                    max_iter=60, tol=1e-3, progress=None, cancel=None, Ks=None):
+    """Load-controlled modified Newton solution. Returns (u, sig, history, converged).
+    Ks: stiffness of linear structural elements (may add rotation dofs after the 2 nn soil dofs)."""
     ne, ngp = mesh.ne, mesh.ngp
+    nd = 2 * mesh.nn
+    ndof = Ks.shape[0] if Ks is not None else nd
     cidx = np.array(sorted(fixed), int)
-    free = np.setdiff1d(np.arange(2 * mesh.nn), cidx)
+    free = np.setdiff1d(np.arange(ndof), cidx)
+    F_total = np.concatenate([F_total, np.zeros(ndof - len(F_total))])
 
-    def f_int(sig):
+    def soil(sig):
         return mesh.vector(np.einsum("egji,egj,eg->ei", mesh.B, sig.reshape(ne, ngp, 4), mesh.dV))
 
+    def f_int(sig, u_struct=None):
+        f = np.concatenate([soil(sig), np.zeros(ndof - nd)])
+        if Ks is not None and u_struct is not None:
+            f = f + Ks @ u_struct
+        return f
+
     f0 = f_int(cons.s)
-    u = np.zeros(2 * mesh.nn)
+    u = np.zeros(ndof)
     history, ok_all = [], True
-    for k in range(steps):
-        if cancel and cancel():
-            raise RuntimeError("Cancelled")
-        F = F_total * (k + 1) / steps
-        uc = uc_total * (k + 1) / steps
-        def factor(D):
-            K = mesh.assemble(np.einsum("egji,egjk,egkl,eg->eil", mesh.B, D.reshape(ne, ngp, 4, 4), mesh.B, mesh.dV))
-            return splu(K[free][:, free].tocsc()), K[free][:, cidx]
+
+    def factor(D):
+        K = mesh.assemble(np.einsum("egji,egjk,egkl,eg->eil", mesh.B, D.reshape(ne, ngp, 4, 4), mesh.B, mesh.dV))
+        if Ks is not None:
+            from .sigma import _pad
+            K = _pad(K, ndof) + Ks
+        return splu(K[free][:, free].tocsc()), K[free][:, cidx]
+
+    def attempt(F, uc):
+        """Equilibrium iterations for the load level F from the committed state."""
         lu, Kfc = factor(cons.tangent())
-        du = np.zeros(2 * mesh.nn)
+        du = np.zeros(ndof)
         du[cidx] = uc - u[cidx]
-        R = F - (f_int(cons.s) - f0)
+        R = F - (f_int(cons.s, u) - f0)
         du[free] = lu.solve(R[free] - Kfc @ du[cidx])
         scale = max(np.abs(F).max(), np.abs(f0).max() * 1e-3, 1e-9)
-        conv = False
+        s, state, res, it = cons.s, None, np.inf, 0
         for it in range(1, max_iter + 1):
             deps = np.einsum("egij,ej->egi", mesh.B, du[mesh.dof]).reshape(-1, 4)
             s, state = cons.integrate(deps)
-            R = F - (f_int(s) - f0)
+            R = F - (f_int(s, u + du) - f0)
             res = float(np.abs(R[free]).max())
+            if not np.isfinite(res) or res > 1e6 * scale:
+                return False, du, s, state, it, np.inf
             if res <= tol * scale:
-                conv = True
-                break
+                return True, du, s, state, it, res / scale
             if it <= 8:                       # full Newton early on, then keep the last tangent
                 lu, Kfc = factor(cons.tangent(s, state))
-            ddu = np.zeros(2 * mesh.nn)
+            ddu = np.zeros(ndof)
             ddu[free] = lu.solve(R[free])
             du += ddu
             if np.abs(ddu).max() <= 1e-4 * max(np.abs(du).max(), 1e-12):
                 deps = np.einsum("egij,ej->egi", mesh.B, du[mesh.dof]).reshape(-1, 4)
                 s, state = cons.integrate(deps)
-                res = float(np.abs((F - (f_int(s) - f0))[free]).max())
-                conv = True
-                break
+                res = float(np.abs((F - (f_int(s, u + du) - f0))[free]).max())
+                return bool(np.isfinite(res) and res <= 10 * tol * scale), du, s, state, it, res / scale
+        return False, du, s, state, it, res / scale
+
+    # load steps, cut in half (down to 1/64 of a step) when a step does not converge
+    base = 1.0 / steps
+    done, size, k = 0.0, base, 0
+    while done < 1.0 - 1e-12:
+        if cancel and cancel():
+            raise RuntimeError("Cancelled")
+        size = min(size, 1.0 - done)
+        F, uc = F_total * (done + size), uc_total * (done + size)
+        conv, du, s, state, it, res = attempt(F, uc)
+        if not conv and size > base / 64:
+            size *= 0.5
+            continue
+        if state is None or not np.all(np.isfinite(du)):
+            ok_all = False
+            break
         cons.commit(s, state)
         u += du
+        done += size
+        k += 1
         ok_all &= conv
-        history.append({"step": k + 1, "iterations": it, "converged": conv,
-                        "max_disp": float(np.max(np.hypot(u[0::2], u[1::2]))), "residual": res / scale})
+        history.append({"step": k, "load_fraction": done, "iterations": it, "converged": conv,
+                        "max_disp": float(np.max(np.hypot(u[0:nd:2], u[1:nd:2]))), "residual": res})
         if progress:
-            progress(int(100 * (k + 1) / steps))
+            progress(int(100 * done))
+        if conv:
+            size = min(base, size * 2)
     return u, cons.s.reshape(ne, ngp, 4), history, ok_all

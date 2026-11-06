@@ -182,7 +182,7 @@ def _bc_types(bc_el):
         review = args.get("Review", "false").lower() == "true"
         if f == "HydPressureHead":
             out["hydraulic"] = ("pressure_head", v)
-        elif f == "HydTotalHead":
+        elif f in ("HydTotalHead", "HydHeadvsTime", "HydHead"):
             out["hydraulic"] = ("head", v)
         elif f == "HydTotalFlux":
             out["hydraulic"] = ("seepage_face", 0.0) if review and v == 0 else ("nodal_flux", v)
@@ -414,6 +414,7 @@ def read_gsz(path) -> Project:
 STRESS_MODEL_OUT = {"linear_elastic": "LinearElastic", "elastic_plastic": "ElasticPlastic", "none": "None"}
 SEEP_MODEL_OUT = {"saturated": "SatOnly"}
 METHOD_OUT = {"insitu": "Insitu2", "consolidation": "Consolidation"}
+SEEP_METHOD_OUT = {False: "SteadyState", True: "Transient"}
 SLOPE_MODEL_OUT = {"mohr_coulomb": "MohrCoulomb"}
 SLOPE_METHOD_OUT = {"ordinary": "Ordinary", "bishop": "Bishop", "janbu": "Janbu", "spencer": "Spencer",
                     "morgenstern_price": "Morgenstern-Price"}
@@ -438,9 +439,15 @@ def _bc_attrs(bc):
     if t == "pressure_head":
         return {"Hydraulic": f"HydPressureHead(Variability=Constant,Value={v})"}
     if t == "head":
-        return {"Hydraulic": f"HydTotalHead(Variability=Constant,Value={v})"}
+        return {"Hydraulic": f"HydHeadvsTime(Variability=Constant,Value={v})"}
     if t == "seepage_face":
         return {"Hydraulic": "HydTotalFlux(Variability=Constant,Value=0,Review=true)"}
+    if t == "flux":
+        return {"Hydraulic": f"HydUnitFlux(Variability=Constant,Value={v})"}
+    if t == "infiltration":
+        return {"Hydraulic": f"HydUnitFlux(Variability=Constant,Value={v},Review=true)"}
+    if t == "nodal_flux":
+        return {"Hydraulic": f"HydTotalFlux(Variability=Constant,Value={v})"}
     return None
 
 
@@ -480,18 +487,23 @@ def _write_model(root, project, region_ids, lines, points):
         if m.stress_model not in STRESS_MODEL_OUT:
             skipped.append(f"material '{m.name}': stress model {m.stress_model} written as linear elastic")
     exported = [a for a in project.analyses if (a.kind == "stress" and a.stress_type in METHOD_OUT)
-                or (a.kind == "slope" and a.method in SLOPE_METHOD_OUT)]
+                or (a.kind == "slope" and a.method in SLOPE_METHOD_OUT) or a.kind == "seepage"]
     skipped += [f"analysis '{a.name}' ({a.kind})" for a in project.analyses if a not in exported]
+    skipped += [f"structure '{st.name}'" for st in getattr(project, "structures", []) or []]
+    skipped += [f"construction stage of '{a.name}' (regions not present)" for a in exported
+                if getattr(a, "inactive_regions", None)]
+    skipped += [f"rapid drawdown setting of '{a.name}'" for a in exported if getattr(a, "rapid_drawdown", False)]
     ans = ET.SubElement(root, "Analyses", Len=str(len(exported)))
     ids = {a.id for a in exported}
     for a in exported:
         el = ET.SubElement(ans, "Analysis")
         ET.SubElement(el, "ID").text = str(a.id)
         ET.SubElement(el, "Name").text = a.name
-        ET.SubElement(el, "Kind").text = "SLOPE/W" if a.kind == "slope" else "SIGMA/W"
+        ET.SubElement(el, "Kind").text = {"slope": "SLOPE/W", "seepage": "SEEP/W"}.get(a.kind, "SIGMA/W")
         if a.parent_id in ids:
             ET.SubElement(el, "ParentID").text = str(a.parent_id)
-        ET.SubElement(el, "Method").text = (SLOPE_METHOD_OUT[a.method] if a.kind == "slope"
+        ET.SubElement(el, "Method").text = (SLOPE_METHOD_OUT[a.method] if a.kind == "slope" else
+                                            SEEP_METHOD_OUT[bool(a.transient)] if a.kind == "seepage"
                                             else METHOD_OUT[a.stress_type])
         ET.SubElement(el, "GeometryId").text = "1"
         ti = ET.SubElement(el, "TimeIncrements")
@@ -500,6 +512,22 @@ def _write_model(root, project, region_ids, lines, points):
             ts = ET.SubElement(ti, "TimeSteps", Len="1")
             ET.SubElement(ts, "TimeStep", Save="true")
             ET.SubElement(el, "ComputedPhysics", SlopeStability="true")
+        elif a.kind == "seepage" and not a.transient:
+            ET.SubElement(ti, "Duration", Missing="true")
+            ts = ET.SubElement(ti, "TimeSteps", Len="1")
+            ET.SubElement(ts, "TimeStep", Save="true")
+            ET.SubElement(el, "ComputedPhysics", WaterTransfer="true")
+        elif a.kind == "seepage":
+            from .fe import time_steps
+            dts = time_steps(a.duration, a.n_steps, a.step_growth)
+            ET.SubElement(ti, "Duration").text = f"{a.duration:.12g}"
+            ET.SubElement(ti, "IncrementCount").text = str(len(dts))
+            ts = ET.SubElement(ti, "TimeSteps", Len=str(len(dts)))
+            t = 0.0
+            for dt in dts:
+                t += float(dt)
+                ET.SubElement(ts, "TimeStep", Step=f"{float(dt):.12g}", ElapsedTime=f"{t:.12g}", Save="true")
+            ET.SubElement(el, "ComputedPhysics", WaterTransfer="true")
         elif a.stress_type == "consolidation":
             ET.SubElement(ti, "Duration").text = f"{a.duration:.12g}"
             ET.SubElement(ti, "IncrementCount").text = str(a.n_steps)
@@ -530,7 +558,13 @@ def _write_model(root, project, region_ids, lines, points):
             skipped.append(f"boundary '{bc.name}' (not on a geometry line)")
             continue
         defs.append((bc, attrs))
-        aids = [aid for aid in (bc.analyses or [a.id for a in exported if a.kind == "stress"]) if aid in ids]
+        hydraulic = "Hydraulic" in attrs
+        if hydraulic:
+            default = [a.id for a in exported if a.kind == "seepage" or
+                       (a.kind == "stress" and a.stress_type == "consolidation")]
+        else:
+            default = [a.id for a in exported if a.kind == "stress"]
+        aids = [aid for aid in (bc.analyses or default) if aid in ids]
         uses.append((len(defs), "Hydraulic" in attrs, on, aids))
     bcs = ET.SubElement(root, "BCs", Len=str(len(defs)))
     for i, (bc, attrs) in enumerate(defs, 1):
@@ -544,11 +578,11 @@ def _write_model(root, project, region_ids, lines, points):
             ET.SubElement(um, "GeometryUsesMaterial", ID=f"Regions-{i}", Entry=str(r.material_id))
         hyd = [(bid, lid) for bid, is_h, on, aids in uses if is_h and a.id in aids for lid in on]
         mech = [(bid, lid) for bid, is_h, on, aids in uses if not is_h and a.id in aids for lid in on]
-        if a.stress_type == "consolidation" and hyd:
+        if (a.kind == "seepage" or a.stress_type == "consolidation") and hyd:
             h = ET.SubElement(ctx, "GeometryUsesHydraulicBCs", Len=str(len(hyd)))
             for bid, lid in hyd:
                 ET.SubElement(h, "GeometryUsesHydraulicBC", ID=f"Lines-{lid}", Entry=str(bid))
-        for comp in (("X", "Y") if mech else ()):
+        for comp in (("X", "Y") if mech and a.kind == "stress" else ()):
             c = ET.SubElement(ctx, f"GeometryUses{comp}DispBCs", Len=str(len(mech)))
             for bid, lid in mech:
                 ET.SubElement(c, f"GeometryUses{comp}DispBC", ID=f"Lines-{lid}", Entry=str(bid))
@@ -686,6 +720,9 @@ def write_gsz(project: Project, path):
         rg = ET.SubElement(re_, "Region")
         ET.SubElement(rg, "ID").text = str(i)
         ET.SubElement(rg, "PointIDs").text = ",".join(str(v) for v in ids)
+    fe_sizes = [a.mesh_size for a in project.analyses if a.kind in ("seepage", "stress")]
+    if fe_sizes:
+        ET.SubElement(g, "MeshDefaultEdgeLength").text = _f(min(fe_sizes))
     ET.SubElement(g, "Precision").text = "6,6,7"
     skipped = _write_model(root, project, region_ids, lines, {i: pt for i, pt in enumerate(points, 1)})
     order = ["FileInfo", "Analyses", "BCs", "Contexts", "Coordinates", "Geometries", "Materials", "StabilityItems",

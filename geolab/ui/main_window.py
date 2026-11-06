@@ -25,12 +25,13 @@ from .chat import ChatController
 from .theme import MODES as THEME_MODES
 from .theme import apply_theme, is_dark, manager as theme_manager
 from .dialogs import (AIDialog, BCDialog, DefineProjectDialog, EntryExitDialog, GraphDialog, MaterialsDialog, PointsDialog,
-                      ProjectDialog, ReinforcementDialog, SliceTable, TextDialog)
+                      ProjectDialog, ReinforcementDialog, SliceTable, StructureDialog, TextDialog)
+from .guide import QuickSlopeDialog, StepBar
 from .home import HomePage
 from .icons import set_dark_icons
 from .icons import tool_icon as _tool_icon
 
-DRAW_ORDER = ("region", "assign", None, "piezo", "bc", None, "point_load", "surcharge", "reinforcement", None,
+DRAW_ORDER = ("region", "assign", None, "piezo", "bc", None, "point_load", "surcharge", "reinforcement", "structure", None,
               "entry_exit", "grid", None, "flux_section")
 from .pdf import export_pdf, paint_pages
 from .render import Renderer, View, available_fields, project_bounds, result_times
@@ -102,7 +103,8 @@ class MainWindow(QMainWindow):
         self.probe = None          # last clicked point in the results view
         self.current_material_id = self.project.materials[0].id
         self.bc_params = {"name": "Head", "type": "head", "value": 10.0, "value2": 0.0, "fn": [], "analyses": [],
-                          "fn2": [], "humidity": 0.5}
+                          "fn2": [], "humidity": 0.5, "value3": 0.0, "root_depth": 0.0}
+        self.struct_template = None
         self.reinf_template = None
         self.point_load = (100.0, 0.0)
         self.surcharge_q = 10.0
@@ -114,7 +116,16 @@ class MainWindow(QMainWindow):
         self.home.chosen.connect(self.home_chosen)
         from PySide6.QtWidgets import QStackedWidget
         self.pages = QStackedWidget()
-        self.pages.addWidget(self.canvas)
+        self.stepbar = StepBar()
+        self.stepbar.step_clicked.connect(self.step_clicked)
+        self.stepbar.close_btn.clicked.connect(lambda: self.a_steps.setChecked(False))
+        self.drawing = QWidget()
+        dl = QVBoxLayout(self.drawing)
+        dl.setContentsMargins(0, 0, 0, 0)
+        dl.setSpacing(0)
+        dl.addWidget(self.stepbar)
+        dl.addWidget(self.canvas, 1)
+        self.pages.addWidget(self.drawing)
         self.pages.addWidget(self.home)
         self.setCentralWidget(self.pages)
         self._hidden_on_home = []
@@ -254,6 +265,13 @@ class MainWindow(QMainWindow):
         self.a_loads = A("&Loads...", self.edit_loads)
         self.a_reinf = A("&Reinforcement...", self.edit_reinforcement)
         self.a_flux = A("&Flux Sections...", self.edit_flux_sections)
+        self.a_structs = A("S&tructures (walls, anchors, geogrids)...", self.edit_structures)
+        self.a_quick = A("New &Quick Slope...", self.quick_slope, "Ctrl+Shift+N",
+                         tip="Build a complete slope from a few numbers: height, steepness, soil layers, water")
+        self.a_steps = A("Show &Step Guide", checkable=True,
+                         tip="Show the numbered steps above the drawing with a hint for what to do next")
+        self.a_steps.setChecked(str(self.settings.value("ui/step_guide", "true")).lower() in ("true", "1"))
+        self.a_steps.toggled.connect(self._toggle_steps)
         self.draw_group = QActionGroup(self)
         self.draw_actions = {}
         for mode, label, key in (("select", "&Select", "Esc"), ("region", "&Regions", "Ctrl+Shift+R"),
@@ -261,14 +279,19 @@ class MainWindow(QMainWindow):
                                  ("bc", "&Boundary Conditions", None), ("point_load", "Point &Loads", None),
                                  ("surcharge", "S&urcharge Loads", None), ("entry_exit", "Slip Surface &Entry and Exit", None),
                                  ("grid", "Slip Surface &Grid", None), ("reinforcement", "Rein&forcement", None),
+                                 ("structure", "Stru&ctures (wall, anchor, geogrid)", None),
                                  ("flux_section", "Flu&x Sections", None), ("text", "Sketch &Text", None),
                                  ("pan", "Pa&n", None)):
             a = A(label, lambda _=False, m=mode: self.set_draw_mode(m), key, checkable=True)
             self.draw_group.addAction(a)
             self.draw_actions[mode] = a
         self.draw_actions["select"].setChecked(True)
+        from .canvas import MODE_HINTS
         for mode, act in self.draw_actions.items():
             self._set_tool_icon(act, mode)
+            if mode in MODE_HINTS:
+                act.setToolTip(f"<b>{act.text().replace('&', '')}</b><br>{MODE_HINTS[mode]}")
+                act.setStatusTip(MODE_HINTS[mode])
         self._set_tool_icon(self.a_mats, "materials")
         for act, name in ((self.a_zin, "zoom_in"), (self.a_zout, "zoom_out"), (self.a_print, "print"),
                           (self.a_copy, "copy"), (self.opt_actions["grid"], "grid_toggle"),
@@ -301,6 +324,7 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
         m = mb.addMenu("&File")
         m.addAction(self.a_new)
+        m.addAction(self.a_quick)
         nm = m.addMenu("New by &Analysis Type")
         for a in self.a_new_kind.values():
             nm.addAction(a)
@@ -338,6 +362,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_slices)
         m.addAction(self.a_graph)
         m.addSeparator()
+        m.addAction(self.a_steps)
         tm = m.addMenu("&Theme")
         for a in self.a_theme.values():
             tm.addAction(a)
@@ -351,7 +376,7 @@ class MainWindow(QMainWindow):
         child = m.addMenu("Add &Child Analysis (uses the selected analysis)")
         for a in self.a_add_child.values():
             child.addAction(a)
-        for a in (self.a_del_analysis, None, self.a_bcs, self.a_piezo_pts, self.a_loads, self.a_reinf, self.a_flux):
+        for a in (self.a_del_analysis, None, self.a_bcs, self.a_piezo_pts, self.a_loads, self.a_reinf, self.a_structs, self.a_flux):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("D&raw")
@@ -402,7 +427,7 @@ class MainWindow(QMainWindow):
             self.addToolBar(area, t)
             self.window_menu.insertAction(first_window_action, t.toggleViewAction())
             return t
-        tb("Standard", [self.a_new, self.a_open, self.a_save, None, self.a_print, self.a_pdf, None, self.a_copy,
+        tb("Standard", [self.a_new, self.a_quick, self.a_open, self.a_save, None, self.a_print, self.a_pdf, None, self.a_copy,
                         None, self.a_undo, self.a_redo, None, self.a_verify, self.a_solve, self.a_solve_all,
                         self.a_stop, None, self.a_zin, self.a_zout, self.a_fit])
         self.addToolBarBreak()
@@ -598,6 +623,19 @@ class MainWindow(QMainWindow):
         self.project.add_reinforcement(t.type if t else "nail", x1, y1, x2, y2, **kw)
         self.after_change("Add reinforcement")
 
+    def add_structure(self, pts):
+        t = self.struct_template
+        self.before_change()
+        if t is None:
+            self.project.add_structure("beam", pts)
+        else:
+            n = sum(1 for x in self.project.structures if x.type == t.type) + 1
+            name = t.name if t.name and not any(x.name == t.name for x in self.project.structures) \
+                else f"{t.type.capitalize()} {n}"
+            self.project.add_structure(t.type, pts, name, EA=t.EA, EI=t.EI, spacing=t.spacing,
+                                       prestress=t.prestress, analyses=list(t.analyses))
+        self.after_change("Add structure")
+
     def add_flux_section(self, pts):
         self.before_change()
         self.project.add_flux_section(f"FS{len(self.project.flux_sections) + 1}", pts)
@@ -661,6 +699,10 @@ class MainWindow(QMainWindow):
         self.a_redo.setEnabled(bool(self.redo_stack))
         name = self.path.name if self.path else "Untitled"
         self.setWindowTitle(f"{name}{' *' if self.dirty else ''} - {self.project.title} - {APP_NAME}")
+        if hasattr(self, "stepbar"):
+            self.stepbar.setVisible(self.a_steps.isChecked())
+            if self.a_steps.isChecked():
+                self.stepbar.update_steps(self.project, self.current_analysis())
         self.canvas.update()
 
     def refresh_tree(self):
@@ -716,6 +758,13 @@ class MainWindow(QMainWindow):
             c = r.get("critical")
             if c:
                 html.append(f"<span style='font-size:16pt'><b>F = {c['fos']:.3f}</b></span><br>")
+                dd = r.get("drawdown")
+                if dd:
+                    html.append(f"Rapid drawdown to {dd['level']:g} {p.unit('length')}:<br>"
+                                f"&nbsp; stage 1 (before) F = {dd['stage1']:.3f}<br>"
+                                f"&nbsp; stage 2 (undrained) F = {dd['stage2']:.3f}<br>"
+                                f"&nbsp; stage 3 (lower of drained / undrained) F = {dd['stage3']:.3f}<br>"
+                                f"&nbsp; {dd['undrained_slices']} of {dd['slices']} slices undrained<br>")
                 html.append(f"Valid trial surfaces: {r['n_valid']} of {r['n_total']}<br><table>")
                 for m, v in c["all_methods"].items():
                     val = "-" if v["fos"] is None else f"{v['fos']:.3f}"
@@ -749,6 +798,9 @@ class MainWindow(QMainWindow):
             if cl:
                 h.append(f"Rainfall {cl['rainfall']:.4g}, evaporation {cl['evaporation']:.4g}, runoff "
                          f"{cl['runoff']:.4g} {u('length')}³ per unit width<br>")
+                if cl.get("potential_transpiration"):
+                    h.append(f"Plant transpiration {cl['transpiration']:.4g} of a potential "
+                             f"{cl['potential_transpiration']:.4g} {u('length')}³ per unit width<br>")
         elif t == "stress":
             if r.get("srm_fos"):
                 h.append(f"<span style='font-size:14pt'><b>Strength reduction F = {r['srm_fos']:.3f}</b></span><br>")
@@ -758,6 +810,13 @@ class MainWindow(QMainWindow):
                 h.append(f"Reaction {name}: x {rx:.4g}, y {ry:.4g} {u('force')}<br>")
             if r.get("settlement_history"):
                 h.append(f"Final settlement (monitor point): {r['settlement_history'][-1]:.4g} {u('length')}<br>")
+            if r.get("inactive") and any(r["inactive"]):
+                h.append(f"Stage: {sum(r['inactive'])} elements not built / excavated<br>")
+            for st in r.get("structures") or []:
+                line = f"{st['name']}: max axial force {st['max_N']:.4g} {u('force')}/{u('length')}"
+                if st["type"] == "beam":
+                    line += f", max moment {st['max_M']:.4g} {u('force')}.{u('length')}/{u('length')}"
+                h.append(line + " (tension +)<br>")
         elif t == "dynamic":
             f1 = r.get("natural_frequency")
             h.append(f"Peak acceleration: {max(r['max_acceleration']):.3f} g<br>")
@@ -871,7 +930,8 @@ class MainWindow(QMainWindow):
                 bp["type"] = next(iter(BC_KINDS[group]))
             d = BCDialog(bp["name"], bp["type"], bp["value"], parent=self, kinds=[group] if group else None,
                          value2=bp["value2"], fn=bp["fn"], analyses=bp["analyses"], project=self.project,
-                         fn2=bp["fn2"], humidity=bp["humidity"])
+                         fn2=bp["fn2"], humidity=bp["humidity"], value3=bp.get("value3", 0.0),
+                         root_depth=bp.get("root_depth", 0.0))
             if not d.exec():
                 self.draw_actions["select"].setChecked(True)
                 mode = "select"
@@ -884,6 +944,20 @@ class MainWindow(QMainWindow):
                 mode = "select"
             else:
                 self.reinf_template = d.r
+        if mode == "structure":
+            a = self.current_analysis()
+            if a is None or a.kind not in ("stress", "dynamic"):
+                QMessageBox.information(self, APP_NAME, "Structures (walls, anchors, geogrids) are used by "
+                                        "stress-deformation analyses. Select or add a stress analysis first.")
+                self.draw_actions["select"].setChecked(True)
+                mode = "select"
+            else:
+                d = StructureDialog(self.struct_template, self, self.project.unit, self.project)
+                if not d.exec():
+                    self.draw_actions["select"].setChecked(True)
+                    mode = "select"
+                else:
+                    self.struct_template = d.st
         if mode == "point_load":
             fy, ok = QInputDialog.getDouble(self, "Point Load", f"Vertical load ({self.project.unit('force')}, down +):",
                                             self.point_load[0], -1e9, 1e9, 3)
@@ -1164,8 +1238,14 @@ class MainWindow(QMainWindow):
         d = ProjectDialog(self.project, self)
         if d.exec():
             self.before_change()
+            old = self.project.units
             d.apply()
-            self.after_change("Project properties", keep_results=True)
+            converted = old != self.project.units and d.convert.isChecked()
+            self.after_change("Project properties", keep_results=not converted)
+            if converted:
+                self.canvas.zoom_fit()
+                QMessageBox.information(self, APP_NAME, f"All values were converted to {self.project.units} "
+                                        "units. Not converted (check them): " + ", ".join(d.not_converted) + ".")
 
     def edit_materials(self):
         d = MaterialsDialog(self.project, self)
@@ -1347,6 +1427,79 @@ class MainWindow(QMainWindow):
             self.project.add_reinforcement(t, x1, y1, x2, y2, capacity=cap, bond=bond, bond_length=bl,
                                            spacing=sp, f_dependent=fd)
         self.after_change("Edit reinforcement")
+
+    def edit_structures(self):
+        from ..model import STRUCTURE_TYPES
+        names = {a.id: a.name for a in self.project.analyses}
+        lines = [f"{st.type}; {st.name}; {st.EA:g} {st.EI:g} {st.spacing:g} {st.prestress:g}; "
+                 + " ".join(f"{x:g},{y:g}" for x, y in st.points)
+                 + (f"; {','.join(str(i) for i in st.analyses)}" if st.analyses else "")
+                 for st in self.project.structures]
+        stages = ", ".join(f"{i} = {n}" for i, n in names.items())
+        d = TextEditDialog("Structures",
+                           "type; name; EA EI spacing prestress; x,y x,y ...; stage ids (optional)\n"
+                           "Types: " + ", ".join(STRUCTURE_TYPES) + f".  Analysis ids: {stages}",
+                           "\n".join(lines), self)
+        if not d.exec():
+            return
+        rows = []
+        try:
+            for line in d.text().splitlines():
+                if not line.strip():
+                    continue
+                parts = [x.strip() for x in line.split(";")]
+                if len(parts) < 4 or parts[0] not in STRUCTURE_TYPES:
+                    raise ValueError(line)
+                EA, EI, sp, pre = (float(v) for v in parts[2].split())
+                pts = [[float(a) for a in xy.split(",")] for xy in parts[3].split()]
+                if len(pts) < 2:
+                    raise ValueError(line)
+                stg = [int(v) for v in parts[4].split(",")] if len(parts) > 4 and parts[4] else []
+                rows.append((parts[0], parts[1], EA, EI, sp, pre, pts, stg))
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid input", f"Could not read: {e}")
+            return
+        self.before_change()
+        self.project.structures = []
+        for t, name, EA, EI, sp, pre, pts, stg in rows:
+            self.project.add_structure(t, pts, name, EA=EA, EI=EI, spacing=sp, prestress=pre, analyses=stg)
+        self.after_change("Edit structures")
+
+    # -- beginners ------------------------------------------------------------
+    def quick_slope(self):
+        if not self.maybe_save():
+            return
+        d = QuickSlopeDialog(self, self.project.units)
+        if not d.exec() or d.project is None:
+            return
+        self.show_workspace()
+        self.set_project(d.project)
+        self.canvas.zoom_fit()
+        if d.solve_now.isChecked():
+            self.solve_current()
+
+    def _toggle_steps(self, on):
+        self.settings.setValue("ui/step_guide", "true" if on else "false")
+        self.stepbar.setVisible(on)
+        if on:
+            self.stepbar.update_steps(self.project, self.current_analysis())
+
+    def step_clicked(self, key):
+        if key in ("region", "piezo", "bc", "entry_exit"):
+            if key == "entry_exit":
+                self.entry_exit_dialog()
+                return
+            self.draw_actions[key].setChecked(True)
+            self.set_draw_mode(key)
+        elif key == "materials":
+            self.edit_materials()
+        elif key == "analysis":
+            self.edit_analysis()
+        elif key == "solve":
+            self.solve_current()
+        elif key == "results":
+            self.a_results.setChecked(True)
+            self.set_view("results")
 
     def edit_flux_sections(self):
         lines = [f"{f.name}; " + " ".join(f"{x:g},{y:g}" for x, y in f.points) for f in self.project.flux_sections]
@@ -1615,7 +1768,7 @@ class MainWindow(QMainWindow):
 
     def show_workspace(self):
         if self.pages.currentWidget() is self.home:
-            self.pages.setCurrentWidget(self.canvas)
+            self.pages.setCurrentWidget(self.drawing)
             for w in self._hidden_on_home:
                 w.show()
             self._hidden_on_home = []
@@ -1639,6 +1792,8 @@ class MainWindow(QMainWindow):
             self.open_example(arg)
         elif action == "ai":
             self.ai_builder()
+        elif action == "quick":
+            self.quick_slope()
         elif action == "guide":
             self.quick_guide()
         elif action in ("docs", "issues"):
@@ -1726,6 +1881,13 @@ class TextEditDialog(QDialog):
 
 GUIDE = """GeoLab quick guide
 
+0. Easiest start
+   - File > New Quick Slope (Ctrl+Shift+N): type the height, steepness, soil layers and water depth;
+     GeoLab draws the model and solves it. Change anything afterwards.
+   - The step guide above the drawing shows the steps of the selected analysis. The blue step is the
+     next one; click it to open the right tool. Ticked steps are done. View > Show Step Guide hides it.
+   - Hover over any drawing tool for a one-line explanation.
+
 1. Define the problem
    - File > New Project: pick the first analysis type (slope, seepage, stress, dynamic, thermal,
      contaminant transport or air flow). More analyses can be added later (Define > Add Analysis).
@@ -1775,7 +1937,22 @@ GUIDE = """GeoLab quick guide
    - Help > AI Slope Builder: describe one slope in words and Claude builds the model.
    Review every value before relying on the result.
 
-7. Day and night
+7. Construction stages, walls and anchors (stress-deformation)
+   - Make one stress analysis per stage, each a child of the previous one (in situ first).
+   - Analysis settings > Construction Stage: untick the regions dug out (excavation) or not built yet
+     (fill placed later). Removed soil releases its stresses; new fill adds its weight.
+   - Draw > Structures: walls / beams (bending), anchors / struts (axial, optional prestress), geogrids
+     (tension only); choose the stages each one is present in. Results show axial force and moment.
+   - Soil models: linear elastic, Mohr-Coulomb, Modified Cam Clay, hyperbolic and Hardening Soil;
+     consolidation stages can be elastic-plastic.
+
+8. More
+   - Slope: Rapid Drawdown tab (Duncan-Wright-Wong): draw the water table at the full reservoir,
+     enter the level after drawdown and the R envelope (c_R, phi_R) of each clay in Materials.
+   - Seepage climate boundary: plant transpiration and root depth (root water uptake).
+   - Define > Project Properties: switching metric / imperial converts every value.
+
+9. Day and night
    - View > Theme (or Edit > Preferences): Light, Dark or Auto (follows the operating system).
 
 Mouse: wheel zooms, middle button pans, right-click finishes a line. Keys: Esc select, F fit, Del delete region.

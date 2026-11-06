@@ -21,7 +21,7 @@ import math
 
 import numpy as np
 from scipy.sparse import coo_matrix, bmat, diags
-from scipy.sparse.linalg import splu, spsolve
+from scipy.sparse.linalg import splu
 
 from .fe import GAUSS3, T3, interpolator, t3_shape, t6_shape, time_steps, to_t6
 from .geometry import polyline_y, validate_geometry
@@ -124,14 +124,16 @@ def mc_gradient(s, c, sinphi, cosphi, scale):
 class _Model:
     """Material arrays per element (and per Gauss point where needed)."""
 
-    def __init__(self, project, mesh: Mesh6, srf=1.0):
+    def __init__(self, project, mesh: Mesh6, srf=1.0, analysis=None):
+        from .structures import inactive_elements
         mats = {m.id: m for m in project.materials}
         ml = [mats[i] for i in mesh.mats]
-        self.active = np.array([m.stress_model != "none" for m in ml])
+        self.inactive = inactive_elements(project, mesh, analysis)      # not built yet / excavated
+        self.active = np.array([m.stress_model != "none" for m in ml]) & ~self.inactive
         self.E = np.array([m.E for m in ml], float)
         self.nu = np.array([min(m.nu, 0.495) for m in ml], float)
         self.gamma = np.array([m.unit_weight for m in ml], float)
-        self.plastic = np.array([m.stress_model == "elastic_plastic" for m in ml])
+        self.plastic = np.array([m.stress_model == "elastic_plastic" for m in ml]) & self.active
         undrained = np.array([m.model in ("undrained", "undrained_depth", "shansep") for m in ml])
         c = np.array([m.cohesion for m in ml], float)
         rate = np.array([m.c_rate if m.model == "undrained_depth" else 0.0 for m in ml])
@@ -203,11 +205,15 @@ def _bcs(project, mesh: Mesh6, analysis):
 
 
 class _System:
-    def __init__(self, mesh, model, fixed):
+    def __init__(self, mesh, model, fixed, Ks=None):
         self.mesh, self.model = mesh, model
         Ke = np.einsum("egji,ejk,egkl,eg->eil", mesh.B, model.D, mesh.B, mesh.dV)
         self.K = mesh.assemble(Ke)
         ndof = 2 * mesh.nn
+        if Ks is not None and Ks.shape[0] > 0:
+            ndof = Ks.shape[0]
+            self.K = _pad(self.K, ndof) + Ks
+        self.ndof = ndof
         self.fixed = fixed
         self.cidx = np.array(sorted(fixed), int)
         self.free = np.setdiff1d(np.arange(ndof), self.cidx)
@@ -218,10 +224,18 @@ class _System:
         self.Kfc = self.K[self.free][:, self.cidx]
 
     def solve(self, F, uc):
-        u = np.zeros(2 * self.mesh.nn)
+        u = np.zeros(self.ndof)
+        if len(F) < self.ndof:
+            F = np.concatenate([F, np.zeros(self.ndof - len(F))])
         u[self.cidx] = uc
         u[self.free] = self.lu.solve(F[self.free] - self.Kfc @ uc)
         return u
+
+
+def _pad(K, n):
+    """Square sparse matrix enlarged to n x n with zeros."""
+    K = K.tocoo()
+    return coo_matrix((K.data, (K.row, K.col)), shape=(n, n)).tocsr()
 
 
 def _strain(mesh, u):
@@ -295,12 +309,18 @@ def k0_stress(project, x, y, k0, u):
     return sig
 
 
-def _gravity_load(mesh, model, u_gp):
-    """Body force of the total unit weight plus the pore pressure term (effective stress formulation)."""
+def gravity_fe(mesh, gamma, u_gp, active=None):
+    """Element body forces of the total unit weight plus the pore pressure term (effective stress
+    formulation)."""
     fe = np.zeros((mesh.ne, 12))
-    fe[:, 1::2] = -np.einsum("e,gk,eg->ek", model.gamma, mesh.N, mesh.dV)
-    fe += np.einsum("egji,j,eg,eg->ei", mesh.B, M_VEC, u_gp, mesh.dV)
+    fe[:, 1::2] = -np.einsum("e,gk,eg->ek", gamma, mesh.N, mesh.dV)
+    up = u_gp if active is None else np.where(active[:, None], u_gp, 0.0)
+    fe += np.einsum("egji,j,eg,eg->ei", mesh.B, M_VEC, up, mesh.dV)
     return fe
+
+
+def _gravity_load(mesh, model, u_gp):
+    return gravity_fe(mesh, model.gamma, u_gp, model.active)
 
 
 def _results(project, mesh, model, u, sig_eff, u_gp, analysis, extra=None):
@@ -318,8 +338,16 @@ def _results(project, mesh, model, u, sig_eff, u_gp, analysis, extra=None):
     s1, s3 = principal(st)
     q = np.sqrt(0.5 * ((st[:, 0] - st[:, 1]) ** 2 + (st[:, 1] - st[:, 3]) ** 2 + (st[:, 3] - st[:, 0]) ** 2) + 3 * st[:, 2] ** 2)
     pw = u_gp.mean(axis=1)
+    inactive = getattr(model, "inactive", np.zeros(mesh.ne, bool))
+    if inactive.any():
+        live = np.zeros(mesh.nn, bool)
+        live[mesh.tris[~inactive].ravel()] = True
+        u = u.copy()
+        u[:2 * mesh.nn][0::2][~live] = 0.0
+        u[:2 * mesh.nn][1::2][~live] = 0.0
     res = {
         "type": "stress", "nodes": mesh.nodes3.tolist(), "tris": mesh.tris3.tolist(),
+        "inactive": inactive.tolist(),
         "tri_material": mesh.mats.tolist(),
         "dx": u[0:2 * n3:2].tolist(), "dy": u[1:2 * n3:2].tolist(),
         # compression positive
@@ -336,6 +364,7 @@ def _results(project, mesh, model, u, sig_eff, u_gp, analysis, extra=None):
 
 
 def run_stress(project, analysis, progress=None, cancel=None, parent=None, seep_results=None) -> dict:
+    from .structures import StructureSet, stage_load
     problems = validate_geometry(project)
     if problems:
         raise ValueError("; ".join(problems))
@@ -346,49 +375,68 @@ def run_stress(project, analysis, progress=None, cancel=None, parent=None, seep_
     fixed, F_bc = _bcs(project, mesh, analysis)
     if analysis.srm:
         return run_srm(project, analysis, mesh, fixed, seep_results, progress, cancel)
-    model = _Model(project, mesh)
-    sysm = _System(mesh, model, fixed)
+    model = _Model(project, mesh, analysis=analysis)
+    parent_res = parent.results if parent is not None and parent.results and         parent.results.get("type") == "stress" and analysis.stress_type != "insitu" else None
+    structs = StructureSet(project, mesh, analysis, 0.1 * analysis.mesh_size, parent_res)
     u_gp = _pore_pressure(project, analysis, mesh.gx, mesh.gy, seep_results)
-    uc_total = np.array([fixed[i] for i in sysm.cidx])
     if analysis.stress_type == "insitu" and getattr(analysis, "insitu_method", "gravity") == "k0":
         sig = k0_stress(project, mesh.gx, mesh.gy, model.k0, u_gp)
+        sig[model.inactive] = 0.0
         return _results(project, mesh, model, np.zeros(2 * mesh.nn), sig, u_gp, analysis,
                         {"converged": True, "history": [], "stress_type": "insitu", "reactions": {},
-                         "insitu_method": "k0"})
+                         "insitu_method": "k0", "structures": structs.results(np.zeros(structs.ndof))})
     if analysis.stress_type == "insitu":
         sig = np.zeros((mesh.ne, mesh.ngp, 4))
         F_total = mesh.vector(_gravity_load(mesh, model, u_gp)) + F_bc
     else:
         sig = _initial_stress(project, mesh, model, analysis, parent)
-        F_total = F_bc
+        F_stage, added = stage_load(project, mesh, model, analysis, parent, sig, u_gp, gravity_fe)
+        sig[added] = 0.0                 # newly built regions start without stress
+        sig[model.inactive] = 0.0
+        F_total = F_bc + F_stage
+    F_total = F_total + structs.released + structs.prestress
+    sig_start = sig.copy()
+    staged = bool(model.inactive.any()) or bool(structs.items)
     steps = max(1, int(analysis.load_steps)) if model.plastic.any() or analysis.stress_type == "load" else 1
-    u = np.zeros(2 * mesh.nn)
-    history = []
-    ok = True
     from .soilmodels import NONLINEAR_MODELS, Constitutive, solve_nonlinear
     mats_ = {m.id: m for m in project.materials}
-    if analysis.stress_type == "load" and any(mats_[i].stress_model in NONLINEAR_MODELS for i in set(mesh.mats.tolist())):
-        # Cam Clay / hyperbolic: modified Newton with sub-stepped stress integration
-        cons = Constitutive(project, mesh, model, sig)
-        u, sig, history, ok = solve_nonlinear(mesh, model, cons, fixed, F_total, uc_total, steps, u_gp,
-                                              max_iter=max(60, analysis.max_iter), progress=progress, cancel=cancel)
-        steps = 0
-    for k in range(steps):
-        if cancel and cancel():
-            raise RuntimeError("Cancelled")
-        du, sig, conv, it = _increment(sysm, sig, F_total / steps, uc_total / steps)
-        u += du
-        history.append({"step": k + 1, "iterations": it, "converged": conv,
-                        "max_disp": float(np.max(np.hypot(u[0::2], u[1::2])))})
-        ok &= conv
-        if progress:
-            progress(int(100 * (k + 1) / steps))
+    nonlinear = analysis.stress_type == "load" and any(
+        mats_[i].stress_model in NONLINEAR_MODELS for i, on in zip(mesh.mats.tolist(), model.active) if on)
+    for attempt in range(6):            # repeated only when geogrids go slack (tension only)
+        sig = sig_start.copy()
+        Ks = structs.stiffness() if structs.items else None
+        sysm = _System(mesh, model, fixed, Ks)
+        uc_total = np.array([fixed[i] for i in sysm.cidx])
+        u = np.zeros(sysm.ndof)
+        history = []
+        ok = True
+        if nonlinear:
+            # Cam Clay / hyperbolic / Hardening Soil: modified Newton with sub-stepped stress integration
+            cons = Constitutive(project, mesh, model, sig)
+            u, sig, history, ok = solve_nonlinear(mesh, model, cons, fixed, F_total, uc_total, steps, u_gp,
+                                                  max_iter=max(60, analysis.max_iter), progress=progress,
+                                                  cancel=cancel, Ks=Ks)
+        else:
+            for k in range(steps):
+                if cancel and cancel():
+                    raise RuntimeError("Cancelled")
+                du, sig, conv, it = _increment(sysm, sig, F_total / steps, uc_total / steps)
+                u += du
+                history.append({"step": k + 1, "iterations": it, "converged": conv,
+                                "max_disp": float(np.max(np.hypot(u[0:2 * mesh.nn:2], u[1:2 * mesh.nn:2])))})
+                ok &= conv
+                if progress:
+                    progress(int(100 * (k + 1) / steps))
+        if not structs.compressed_geogrids(u):
+            break
+    sig[model.inactive] = 0.0
     # reactions on restrained boundaries: internal force minus applied load
     f_int = mesh.vector(np.einsum("egji,egj,eg->ei", mesh.B, sig - M_VEC * u_gp[..., None], mesh.dV))
     f_ext = F_total
     if analysis.stress_type != "insitu":
-        sig0 = _initial_stress(project, mesh, model, analysis, parent)
-        f_int -= mesh.vector(np.einsum("egji,egj,eg->ei", mesh.B, sig0 - M_VEC * u_gp[..., None], mesh.dV))
+        f_int -= mesh.vector(np.einsum("egji,egj,eg->ei", mesh.B, sig_start - M_VEC * u_gp[..., None], mesh.dV))
+    if Ks is not None:
+        f_int = f_int + (Ks @ u)[:2 * mesh.nn]
     R = f_int - f_ext
     reactions = {}
     tol = 0.1 * analysis.mesh_size
@@ -397,11 +445,12 @@ def run_stress(project, analysis, progress=None, cancel=None, parent=None, seep_
         if bc.type in ("fixed_x", "fixed_y", "fixed_xy", "displacement_y"):
             idx = [i for i, (x, y) in enumerate(mesh.nodes) if dist_point_polyline(x, y, bc.points) <= tol]
             reactions[bc.name] = [float(R[2 * np.array(idx)].sum()), float(R[2 * np.array(idx) + 1].sum())]
+    struct_res = structs.results(u)
     if analysis.stress_type == "insitu":
         u[:] = 0.0          # in situ displacements are not meaningful
-    return _results(project, mesh, model, u, sig, u_gp, analysis,
+    return _results(project, mesh, model, u[:2 * mesh.nn], sig, u_gp, analysis,
                     {"converged": ok, "history": history, "stress_type": analysis.stress_type,
-                     "reactions": reactions})
+                     "reactions": reactions, "structures": struct_res, "staged": staged})
 
 
 def run_srm(project, analysis, mesh, fixed, seep_results, progress=None, cancel=None):
@@ -410,9 +459,13 @@ def run_srm(project, analysis, mesh, fixed, seep_results, progress=None, cancel=
     u_gp = _pore_pressure(project, analysis, mesh.gx, mesh.gy, seep_results)
     zero = np.zeros((mesh.ne, mesh.ngp, 4))
 
+    from .structures import StructureSet
+    structs = StructureSet(project, mesh, analysis, 0.1 * analysis.mesh_size)
+    Ks = structs.stiffness() if structs.items else None
+
     def stable(srf):
-        model = _Model(project, mesh, srf)
-        sysm = _System(mesh, model, fixed)
+        model = _Model(project, mesh, srf, analysis=analysis)
+        sysm = _System(mesh, model, fixed, Ks)
         F = mesh.vector(_gravity_load(mesh, model, u_gp))
         uc = np.array([fixed[i] for i in sysm.cidx])
         du, sig, conv, it = _increment(sysm, zero, F, uc, plastic_iter=max(500, analysis.max_iter))
@@ -439,7 +492,7 @@ def run_srm(project, analysis, mesh, fixed, seep_results, progress=None, cancel=
         if progress:
             progress(min(95, 10 * len(trials)))
     conv, du, sig, model = stable(lo)
-    return _results(project, mesh, model, du, sig, u_gp, analysis,
+    return _results(project, mesh, model, du[:2 * mesh.nn], sig, u_gp, analysis,
                     {"converged": True, "srm_fos": lo, "srm_trials": trials, "stress_type": "srm"})
 
 
@@ -447,24 +500,37 @@ def run_srm(project, analysis, mesh, fixed, seep_results, progress=None, cancel=
 # Coupled consolidation (Biot)
 # ---------------------------------------------------------------------------
 def run_consolidation(project, analysis, progress=None, cancel=None, parent=None, seep_results=None) -> dict:
-    """Linear elastic coupled consolidation. Loads (stress boundary conditions) are applied at the
-    start (undrained), then excess pore pressures dissipate through drained boundaries (hydraulic
-    head / pressure-head boundary conditions) over the analysis duration."""
+    """Coupled consolidation. Loads (stress boundary conditions, fill placed or soil excavated in this stage,
+    anchors installed) are applied at the start (undrained), then excess pore pressures dissipate through
+    drained boundaries (hydraulic head / pressure-head boundary conditions) over the analysis duration.
+    Elastic-plastic (Mohr-Coulomb) soil yields during consolidation (viscoplastic iterations in each time
+    step); other models use their elastic E and nu."""
+    from .structures import StructureSet, stage_load
     nodes3, tris3, mats = generate_mesh(project, analysis.mesh_size)
     mesh = Mesh6(nodes3, tris3, mats)
-    model = _Model(project, mesh)
+    model = _Model(project, mesh, analysis=analysis)
     fixed, F_bc = _bcs(project, mesh, analysis)
+    parent_res = parent.results if parent is not None and parent.results and         parent.results.get("type") == "stress" else None
+    structs = StructureSet(project, mesh, analysis, 0.1 * analysis.mesh_size, parent_res)
     mats_ = {m.id: m for m in project.materials}
     kx = np.array([mats_[i].k_sat for i in mesh.mats])
     ky = kx * np.array([mats_[i].k_ratio for i in mesh.mats])
     gw = project.gamma_w
+    nd2 = 2 * mesh.nn
     Ke = np.einsum("egji,ejk,egkl,eg->eil", mesh.B, model.D, mesh.B, mesh.dV)
     K = mesh.assemble(Ke)
-    # coupling C (2nn x n3): integral of B^T m Np
+    nd = nd2
+    if structs.items:
+        Ks = structs.stiffness()
+        nd = Ks.shape[0]
+        K = _pad(K, nd) + Ks
+    else:
+        Ks = None
+    # coupling C (nd x n3): integral of B^T m Np
     Ce = np.einsum("egji,j,gk,eg->eik", mesh.B, M_VEC, mesh.Np, mesh.dV)
     rows = np.repeat(mesh.dof, 3, axis=1).ravel()
     cols = np.tile(mesh.tris3, (1, 12)).ravel()
-    C = coo_matrix((Ce.ravel(), (rows, cols)), shape=(2 * mesh.nn, mesh.n3)).tocsr()
+    C = coo_matrix((Ce.ravel(), (rows, cols)), shape=(nd, mesh.n3)).tocsr()
     He = np.einsum("egdi,ed,egdj,eg->eij", mesh.dNp, np.stack([kx, ky], 1) / gw, mesh.dNp, mesh.dV)
     rr = np.repeat(mesh.tris3, 3, axis=1).ravel()
     cc = np.tile(mesh.tris3, (1, 3)).ravel()
@@ -477,36 +543,67 @@ def run_consolidation(project, analysis, progress=None, cancel=None, parent=None
     if not drained:
         raise ValueError("Consolidation needs at least one drained boundary: draw a hydraulic head or "
                          "pressure-head boundary condition where water can drain.")
-    nd = 2 * mesh.nn
     fixed_all = dict(fixed)
     for i in drained:
         fixed_all[nd + i] = 0.0
+    cidx = np.array(sorted(fixed_all), int)
+    xc = np.array([fixed_all[i] for i in cidx])
+    free = np.setdiff1d(np.arange(nd + mesh.n3), cidx)
     steps = time_steps(analysis.duration, analysis.n_steps, analysis.step_growth)
+    sig0 = _initial_stress(project, mesh, model, analysis, parent)
+    u_gp0 = _pore_pressure(project, analysis, mesh.gx, mesh.gy, seep_results)
+    F_stage, added = stage_load(project, mesh, model, analysis, parent, sig0, u_gp0, gravity_fe)
+    sig0[added] = 0.0
+    sig0[model.inactive] = 0.0
+    F = F_bc + F_stage + structs.released + structs.prestress
+    F = np.concatenate([F, np.zeros(nd - nd2)])
     u = np.zeros(nd)
     p = np.zeros(mesh.n3)
-    times, p_hist, settle = [0.0], [], []
-    sig0 = _initial_stress(project, mesh, model, analysis, parent)
+    evp = np.zeros_like(sig0)
+    plastic = bool(model.plastic.any())
+    pl = model.plastic[:, None]
+    yield_ok = True
 
-    def step(dt, F):
-        # [K  -C ; -C^T  -dt H] [u ; p] = [F ; -C^T u_old]
+    def step(dt):
+        """One backward-Euler step: [K -C; -C^T -dt H] [u; p] = [F + plastic load; -C^T u_old]."""
+        nonlocal evp, yield_ok
         A = bmat([[K, -C], [-C.T, -dt * H]]).tocsr()
-        rhs = np.concatenate([F, -C.T @ u])
-        x = np.zeros(nd + mesh.n3)
-        cidx = np.array(sorted(fixed_all), int)
-        x[cidx] = [fixed_all[i] for i in cidx]
-        free = np.setdiff1d(np.arange(nd + mesh.n3), cidx)
-        x[free] = spsolve(A[free][:, free].tocsc(), rhs[free] - A[free][:, cidx] @ x[cidx])
-        return x[:nd], x[nd:]
+        lu = splu(A[free][:, free].tocsc())
+        Afc = A[free][:, cidx]
+        u_old = u.copy()
+        prev = None
+        for it in range(400 if plastic else 1):
+            bdy = mesh.vector(np.einsum("egji,ejk,egk,eg->ei", mesh.B, model.D, evp, mesh.dV))
+            rhs = np.concatenate([F + np.concatenate([bdy, np.zeros(nd - nd2)]), -C.T @ u_old])
+            x = np.zeros(nd + mesh.n3)
+            x[cidx] = xc
+            x[free] = lu.solve(rhs[free] - Afc @ xc)
+            un = x[:nd]
+            if not plastic:
+                return un, x[nd:]
+            if prev is not None and np.max(np.abs(un - prev)) <= 1e-4 * max(np.max(np.abs(un)), 1e-30):
+                return un, x[nd:]
+            prev = un
+            sig = sig0 + np.einsum("eij,egj->egi", model.D, _strain(mesh, un) - evp)
+            f = mc_function(sig, model.c_gp, model.sphi[:, None], model.cphi[:, None])
+            f = np.where(pl & (f > 0), f, 0.0)
+            if not np.any(f > 0):
+                return un, x[nd:]
+            sc = np.maximum(np.abs(sig).max(axis=-1), model.c_gp + 1.0)
+            dq = mc_gradient(sig, model.c_gp, model.spsi[:, None], model.cpsi[:, None], sc)
+            evp = evp + (model.dt * f)[..., None] * dq
+        yield_ok = False
+        return un, x[nd:]
 
-    dy_hist = []
-    u, p = step(0.0, F_bc)                                # undrained loading
+    times, p_hist, dy_hist = [0.0], [], []
+    u, p = step(0.0)                                      # undrained loading
     p_hist.append(p.tolist())
     dy_hist.append(u[1:2 * mesh.n3:2].copy())
     t = 0.0
     for k, dt in enumerate(steps):
         if cancel and cancel():
             raise RuntimeError("Cancelled")
-        u, p = step(dt, F_bc)
+        u, p = step(dt)
         t += dt
         times.append(t)
         p_hist.append(p.tolist())
@@ -515,8 +612,10 @@ def run_consolidation(project, analysis, progress=None, cancel=None, parent=None
             progress(int(100 * (k + 1) / len(steps)))
     top = int(np.argmin(dy_hist[-1]))                     # monitor the point that settles most
     settle = [float(-d[top]) for d in dy_hist]
-    sig = sig0 + np.einsum("eij,egj->egi", model.D, _strain(mesh, u))
-    u_gp = _pore_pressure(project, analysis, mesh.gx, mesh.gy, seep_results) + np.einsum("gk,ek->eg", mesh.Np, p[mesh.tris3])
-    return _results(project, mesh, model, u, sig, u_gp, analysis, {
-        "converged": True, "stress_type": "consolidation", "times": times, "excess_pwp": p.tolist(),
-        "excess_history": p_hist, "settlement_history": settle, "monitor_node": int(top)})
+    sig = sig0 + np.einsum("eij,egj->egi", model.D, _strain(mesh, u) - evp)
+    sig[model.inactive] = 0.0
+    u_gp = u_gp0 + np.einsum("gk,ek->eg", mesh.Np, p[mesh.tris3])
+    return _results(project, mesh, model, u[:nd2], sig, u_gp, analysis, {
+        "converged": yield_ok, "stress_type": "consolidation", "times": times, "excess_pwp": p.tolist(),
+        "excess_history": p_hist, "settlement_history": settle, "monitor_node": int(top),
+        "structures": structs.results(u), "staged": bool(model.inactive.any())})

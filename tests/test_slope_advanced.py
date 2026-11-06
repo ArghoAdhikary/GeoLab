@@ -232,3 +232,22 @@ def test_lognormal_probabilistic():
     r = run_slope(p, a)
     pr = r["probability"]
     assert pr["n"] == 300 and 0.2 < pr["pf"] < 0.8
+
+
+def test_rapid_drawdown_three_stages():
+    from geolab.examples import EXAMPLES
+    from geolab.solver import solve
+    p = EXAMPLES["Rapid drawdown (Duncan-Wright-Wong)"]()
+    r = solve(p, p.analyses[0])
+    d = r["drawdown"]
+    assert d["stage3"] <= d["stage2"] + 1e-9 < d["stage1"]
+    assert d["undrained_slices"] > 0
+    assert r["critical"]["fos"] == d["stage3"]
+    assert 0.7 < d["stage3"] < 1.4
+    # free-draining fill (no R envelope): the same as a drained analysis with the after-drawdown water table
+    p.materials[0].cr = p.materials[0].phi_r = 0.0
+    a = p.analyses[0]
+    F_free = solve(p, a)["critical"]["fos"]
+    a.rapid_drawdown = False
+    p.piezometric_line = r["drawdown"]["line_after"]
+    assert solve(p, a)["critical"]["fos"] == pytest.approx(F_free, rel=1e-6)

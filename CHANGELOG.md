@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.8.0 - 2026-11-07
+
+- Staged construction for stress-deformation: each stage can leave out regions (excavated or not built
+  yet). Dug-out soil releases its stresses, new fill adds its weight (Analysis settings > Construction Stage).
+- Structural elements: walls / beams, anchors / struts (with prestress) and geogrids (tension only),
+  drawn with Draw > Structures and chosen per stage; axial force and bending moment in the results.
+- Hardening Soil model; nonlinear load steps are cut automatically when they do not converge.
+- Elastic-plastic coupled consolidation, with stages and structures.
+- Seepage: plant transpiration and root depth on climate boundaries (Feddes root water uptake).
+- Slope: rapid drawdown by the three-stage Duncan, Wright and Wong method (R envelope per material).
+- Switching metric / imperial now converts every value.
+- GeoStudio export: SEEP/W analyses and hydraulic boundaries; total head is now written as GeoStudio's
+  HydHeadvsTime (the old name was not recognised by GeoStudio).
+- Beginners: step guide above the drawing, File > New Quick Slope, Quick Slope on the start page,
+  tooltips on all drawing tools, a longer Quick Guide.
+- New examples: Anchored excavation (staged), Rapid drawdown (Duncan-Wright-Wong).
+
 ## 2.7.0 - 2026-11-06
 
 - The app is now called **GeoLab** (was StrataLab). Project files keep the .slab extension, and old StrataLab settings are copied over on first start.

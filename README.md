@@ -5,11 +5,13 @@
 - **Slope stability** by limit equilibrium: 11 methods (Bishop, Spencer, Morgenstern-Price, Janbu,
   Corps of Engineers, Lowe-Karafiath, Sarma, ...) plus the finite element stress method; 10 strength
   models; reinforcement, tension cracks, ponded water; six slip surface searches and optimization;
-  probability, sensitivity and Newmark earthquake displacement.
+  probability, sensitivity, Newmark earthquake displacement and rapid drawdown (Duncan-Wright-Wong).
 - **Seepage**: steady and transient, saturated / unsaturated flow with a free phreatic surface, and a
-  climate boundary (rainfall, evaporation, ponding and runoff).
-- **Stress-deformation**: in situ stresses, load-deformation with Mohr-Coulomb, Modified Cam Clay or
-  hyperbolic (Duncan-Chang) soil, strength reduction factor of safety and coupled consolidation.
+  climate boundary (rainfall, evaporation, plant transpiration, ponding and runoff).
+- **Stress-deformation**: in situ stresses, load-deformation with Mohr-Coulomb, Modified Cam Clay,
+  hyperbolic (Duncan-Chang) or Hardening Soil, **staged construction** (excavation and fill in
+  stages), **walls, anchors and geogrids**, strength reduction factor of safety and coupled
+  consolidation (elastic or elastic-plastic).
 - **Dynamic**: earthquake response with equivalent linear soil behaviour.
 - **Thermal** (with freezing and thawing), **contaminant transport** (with particle tracking) and **air flow**.
 - Analyses are linked: seepage feeds slope stability, stress and transport; stresses feed the finite
@@ -20,8 +22,11 @@
   Ollama, LM Studio...), or your Claude / ChatGPT account through the Claude Code or Codex app.
 - **AI Slope Builder**: describe a slope in plain language and Claude sets up the model.
 - **Light, Dark and Auto themes** (View > Theme): day and night colours, Auto follows the system.
+- **Easy for beginners**: File > New Quick Slope builds and solves a slope from a few numbers; a step
+  guide above the drawing says what to do next and opens the right tool; every tool has a tooltip.
+- Metric and imperial units, with every value converted when you switch.
 - Opens GeoStudio `.gsz` files (geometry, materials, slope, stress and seepage analyses, piezometric line, slip surface entry and exit, boundary conditions) and exports them
-  (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, stress / consolidation analyses and their boundaries).
+  (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, seepage (SEEP/W) and stress / consolidation analyses and their boundaries).
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
 
 See [FEATURES.md](FEATURES.md) for exactly what is and isn't implemented, and how each feature was tested.

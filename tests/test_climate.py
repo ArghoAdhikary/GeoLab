@@ -68,3 +68,33 @@ def test_dry_surface_limits_evaporation():
     r = run_seepage(p, a)
     assert r["climate"]["evaporation"] < 0.9 * pe * a.duration     # dry surface cannot evaporate at the potential rate
     assert r["balance_error"] < 0.03
+
+
+def test_feddes_reduction():
+    from geolab.seep import feddes_alpha
+    a = feddes_alpha(np.array([0.5, 0.0, -0.1, -1.0, -4.0, -77.0, -150.0, -300.0]))
+    assert a.tolist() == pytest.approx([0.0, 0.0, 0.4, 1.0, 1.0, 0.5, 0.0, 0.0])
+
+
+def test_plants_transpire_at_potential_rate_from_moist_soil():
+    p, m, a = column(wt=2.0)                     # roots in moist soil above a shallow water table
+    pt = 3e-8                                    # about 2.6 mm/day
+    a.duration, a.n_steps = 5 * DAY, 20
+    p.add_bc("Grass", "climate", 0.0, [(0, 3), (1, 3)], value2=0.0, value3=pt, root_depth=0.6)
+    r = run_seepage(p, a)
+    cl = r["climate"]
+    assert cl["potential_transpiration"] == pytest.approx(pt * 1.0 * a.duration, rel=1e-6)
+    assert cl["transpiration"] == pytest.approx(cl["potential_transpiration"], rel=0.02)
+    assert r["storage_change"] < 0                # the plants dry the soil
+    assert r["balance_error"] < 0.02
+    hp = np.array(r["pressure_head"])
+    y = np.array(r["nodes"])[:, 1]
+    assert hp[(y > 2.6)].mean() < np.array(r["head_history"][0])[(y > 2.6)].mean() - 2.6   # more suction in the root zone
+
+
+def test_no_plants_no_uptake():
+    p, m, a = column(wt=2.0)
+    a.duration, a.n_steps = 1 * DAY, 4
+    p.add_bc("Bare", "climate", 0.0, [(0, 3), (1, 3)], value2=0.0, value3=3e-8, root_depth=0.0)
+    r = run_seepage(p, a)
+    assert r["climate"]["transpiration"] == 0.0

@@ -83,19 +83,32 @@ directly with another vendor's software.
 | Light / Dark / Auto theme | palette, canvas, start page and icon colours checked in tests |
 | Windows and macOS builds | GitHub Actions |
 
+### Added in 2.8.0 (staged construction, structures, more SEEP / SLOPE / SIGMA features)
+
+| Feature | Verified by |
+|---|---|
+| Staged construction: each stress stage lists the regions not present (excavated or not built yet); removed soil releases its stresses, new fill adds its weight, stresses carry on from the parent stage | a stage with no change does not move (exact); 2 m fill on an 8 m layer settles as 1D theory (6 %); excavation floor heaves (`test_staged.py`) |
+| Structural elements in stress analysis: walls / beams (Euler-Bernoulli frame, EA and EI), anchors / struts (bars, spacing, prestress), geogrids (tension only); forces carry over between stages | cantilever tip deflection P L^3 / 3 EI and fixed-end moment P L (exact); bar stiffness EA / (L spacing) (exact); slack geogrid carries no compression; anchored excavation example: anchor stays in tension, wall moment continuous |
+| Hardening Soil (shear hardening: stress-dependent E50 and Eur with exponent m, hyperbolic curve with Rf, Mohr-Coulomb limit; no cap) | modulus at p_ref = 2 E50 / (2 - Rf), (4 p_ref / p_ref)^0.5 = 2 times stiffer, unloading uses Eur (exact); layer load converges, softer with lower E50 |
+| Load steps cut in half automatically when a nonlinear step does not converge (Cam Clay, hyperbolic, Hardening Soil) | a hyperbolic footing that used to diverge now finishes |
+| Consolidation with plasticity (Mohr-Coulomb, viscoplastic iterations each time step), with stages and structures | plastic consolidation settles more than elastic (`test_staged.py`) |
+| Seepage: plant transpiration on climate boundaries (root zone with triangular root density, Feddes reduction: none when saturated, full between -0.25 and -4 m, zero at -150 m) | Feddes values exact; moist soil transpires at the potential rate (2 %), water balance < 2 % (`test_climate.py`) |
+| Slope: rapid drawdown by the three-stage Duncan, Wright and Wong (1990) method with R envelopes (c_R, phi_R) per material | stage 3 <= stage 2 < stage 1; a free-draining fill gives exactly the drained result with the after-drawdown water table (`test_slope_advanced.py`) |
+| Unit conversion of the whole project (m / ft, kPa / psf, kN/m3 / pcf, forces, conductivities, structures, search settings) | metric -> imperial -> metric restores every value; factor of safety the same in both systems (0.2 %) (`test_units.py`) |
+| GeoStudio export of SEEP/W analyses (steady and transient) and hydraulic boundaries (head as HydHeadvsTime, pressure head, unit / total flux, seepage face, infiltration) | exported file opened by GeoStudio 2025.2 GeoCmd: no warnings, recognised as SEEP/W, regions and points verified (solving needs the GUI to mesh it, and a SEEP/W licence) |
+| Beginner help: step guide above the drawing (ticks done steps, highlights the next, one-click tools), Quick Slope dialog (slope from height, steepness, layers, water, load), tooltips on every drawing tool | `test_ui_beginner.py` |
+
 ## Not implemented
 
 | Feature | Notes |
 |---|---|
 | 3D geometry and 3D analyses | 2D only. |
-| Vegetation / transpiration, snow, density-dependent flow, freezing-induced water migration | Climate covers rainfall, evaporation, ponding and runoff. |
-| Hardening Soil, hysteretic cyclic models, liquefaction / pore pressure generation in dynamic analysis | Static models: linear, Mohr-Coulomb, Modified Cam Clay, hyperbolic. |
-| Structural elements in stress analysis (beams, anchors, geogrids) | Reinforcement exists in slope stability only. |
-| Staged construction (adding / removing regions between stages) | Stages share one geometry. |
-| Consolidation with plasticity; Cam Clay / hyperbolic in the in situ stage | Consolidation is linear elastic; nonlinear models apply in load-deformation stages (in situ uses E and nu). |
-| Rapid drawdown by the Duncan-Wright-Wong method | Use transient seepage then slope stability. |
-| Unit conversion when switching unit systems | Switching relabels values. |
-| `.gsz`: slope (SLOPE/W), seepage, dynamic, thermal, transport and air analyses on export; results | Export writes stress (in situ, consolidation) analyses only; the file layout of the others has not been seen in a real file yet. Results are not read. |
+| Snow, density-dependent flow, freezing-induced water migration | Climate covers rainfall, evaporation, plant transpiration, ponding and runoff. |
+| Hardening Soil cap (volumetric hardening), hysteretic cyclic models, liquefaction / pore pressure generation in dynamic analysis | Static models: linear, Mohr-Coulomb, Modified Cam Clay, hyperbolic, Hardening Soil (shear hardening). |
+| Interface elements between structures and soil; structural yield | Structures are tied to the soil nodes and stay elastic. |
+| Cam Clay / hyperbolic / Hardening Soil in the in situ and consolidation stages | Those stages use E and nu (Mohr-Coulomb plasticity is included); the nonlinear models apply in load-deformation stages. |
+| Thermal, transport and air-flow values in unit conversion | Listed after converting so they can be checked. |
+| `.gsz`: dynamic, thermal, transport and air analyses on export; structures, construction stages and rapid drawdown settings; results | Written as a list of skipped items when exporting. Results are not read. |
 | Code signing / notarization | Builds are unsigned. |
 | Live Claude API call | Tested with a fake client only. The AI builder sets up slope models. |
 

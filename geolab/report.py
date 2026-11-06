@@ -126,6 +126,14 @@ def build_report(project, analysis) -> str:
         L.append(f"Sliding towards:   {'+x (right)' if c['driving_direction'] == 'right' else '-x (left)'}")
         if c.get("lambda") is not None:
             L.append(f"Lambda:            {c['lambda']:.4f}")
+        if r.get("drawdown"):
+            dd = r["drawdown"]
+            L.append("")
+            L.append(f"Rapid drawdown (Duncan, Wright and Wong) to elevation {dd['level']:g} {u('length')}:")
+            L.append(f"  stage 1, before drawdown (drained):            F = {_f(dd['stage1'])}")
+            L.append(f"  stage 2, after drawdown (undrained strength):  F = {_f(dd['stage2'])}")
+            L.append(f"  stage 3, lower of drained and undrained:      F = {_f(dd['stage3'])}")
+            L.append(f"  undrained strength used on {dd['undrained_slices']} of {dd['slices']} slices")
         L.append("")
         L.append("All methods on the critical surface:")
         for m, v in c["all_methods"].items():
@@ -174,6 +182,9 @@ def build_report(project, analysis) -> str:
             cl = r["climate"]
             L.append(f"Climate:           rainfall {cl['rainfall']:.4g}, actual evaporation {cl['evaporation']:.4g}, "
                      f"runoff {cl['runoff']:.4g} {u('length')}3 per unit width")
+            if cl.get("potential_transpiration"):
+                L.append(f"Transpiration:     actual {cl['transpiration']:.4g} of potential "
+                         f"{cl['potential_transpiration']:.4g} {u('length')}3 per unit width")
         if t == "stress":
             if r.get("srm_fos"):
                 L.append(f"Strength reduction factor of safety: {r['srm_fos']:.3f}")
@@ -185,6 +196,18 @@ def build_report(project, analysis) -> str:
             if r.get("settlement_history"):
                 L.append(f"Settlement:        immediate {r['settlement_history'][0]:.5g}, final "
                          f"{r['settlement_history'][-1]:.5g} {u('length')}")
+            if r.get("inactive") and any(r["inactive"]):
+                L.append(f"Construction stage: {sum(r['inactive'])} elements not built or excavated")
+            for st in r.get("structures") or []:
+                L.append("")
+                L.append(f"Structure '{st['name']}' ({st['type']}): max axial force {st['max_N']:.4g} "
+                         f"{u('force')}/{u('length')} (tension +)"
+                         + (f", max bending moment {st['max_M']:.4g} {u('force')}.{u('length')}/{u('length')}"
+                            if st["type"] == "beam" else ""))
+                L.append(f"  {'x1':>8}{'y1':>8}{'x2':>8}{'y2':>8}{'N':>11}{'V':>11}{'M1':>11}{'M2':>11}")
+                for e in st["elements"]:
+                    L.append(f"  {e['x1']:>8.2f}{e['y1']:>8.2f}{e['x2']:>8.2f}{e['y2']:>8.2f}{e['N']:>11.3f}"
+                             f"{e['V']:>11.3f}{e['M1']:>11.3f}{e['M2']:>11.3f}")
         if t == "dynamic":
             L.append(f"Peak acceleration: {max(r['max_acceleration']):.3f} g")
             if r.get("natural_frequency"):

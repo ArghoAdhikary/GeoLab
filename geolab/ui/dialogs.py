@@ -66,9 +66,9 @@ class ProjectDialog(QDialog):
         f.addRow("Description", self.desc)
         f.addRow("Units", self.units)
         f.addRow("Grid spacing", self.grid)
-        note = QLabel("Changing units relabels values; it does not convert them.")
-        note.setStyleSheet("color:#666")
-        f.addRow(note)
+        self.convert = QCheckBox("Convert all values when the unit system changes (m <-> ft, kPa <-> psf ...)")
+        self.convert.setChecked(True)
+        f.addRow(self.convert)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
@@ -78,8 +78,13 @@ class ProjectDialog(QDialog):
         self.p.title = self.title.text().strip() or "Untitled"
         self.p.author = self.author.text().strip()
         self.p.description = self.desc.toPlainText().strip()
-        self.p.units = self.units.currentData()
+        new = self.units.currentData()
         self.p.grid_spacing = self.grid.value()
+        self.not_converted = []
+        if new != self.p.units and self.convert.isChecked():
+            from ..units import convert_project
+            self.not_converted = convert_project(self.p, new)
+        self.p.units = new
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +215,9 @@ MATERIAL_TABS = [
         ("sigci", "Hoek-Brown: intact UCS", "float", "pressure"), ("gsi", "Hoek-Brown: GSI", "float"),
         ("mi", "Hoek-Brown: mi", "float"), ("hb_d", "Hoek-Brown: disturbance D", "float"),
         ("cohesion_v", "Anisotropic: c on a vertical plane", "float", "pressure"),
-        ("phi_v", "Anisotropic: phi on a vertical plane (deg)", "float")]),
+        ("phi_v", "Anisotropic: phi on a vertical plane (deg)", "float"),
+        ("cr", "Rapid drawdown: R envelope c_R (CU tests; 0 and 0 = free draining)", "float", "pressure"),
+        ("phi_r", "Rapid drawdown: R envelope phi_R (deg)", "float")]),
     ("Probabilistic", [
         ("distribution", "Distribution", "choice", DISTRIBUTIONS),
         ("cohesion_sd", "Cohesion std dev", "float", "pressure"), ("phi_sd", "Phi std dev (deg)", "float"),
@@ -230,7 +237,12 @@ MATERIAL_TABS = [
         ("e0", "Cam Clay: initial void ratio", "float"),
         ("ocr", "Cam Clay / SHANSEP: overconsolidation ratio", "float"),
         ("dc_K", "Hyperbolic: modulus number K", "float"), ("dc_Kur", "Hyperbolic: unload-reload number Kur", "float"),
-        ("dc_n", "Hyperbolic: modulus exponent n", "float"), ("dc_Rf", "Hyperbolic: failure ratio Rf", "float")]),
+        ("dc_n", "Hyperbolic: modulus exponent n", "float"), ("dc_Rf", "Hyperbolic: failure ratio Rf", "float"),
+        ("hs_E50", "Hardening Soil: E50 at the reference pressure", "float", "modulus"),
+        ("hs_Eur", "Hardening Soil: Eur (unload-reload) at the reference pressure", "float", "modulus"),
+        ("hs_m", "Hardening Soil: stress exponent m", "float"),
+        ("hs_pref", "Hardening Soil: reference pressure", "float", "pressure"),
+        ("hs_Rf", "Hardening Soil: failure ratio Rf", "float")]),
     ("Dynamic", [
         ("damping", "Damping ratio (small strain)", "float"),
         ("gamma_ref", "Reference shear strain (0 = linear)", "float"), ("damping_max", "Maximum damping ratio", "float")]),
@@ -270,6 +282,11 @@ def validate_material(m: Material):
         raise ValueError(f"{m.name}: Cam Clay needs 0 < kappa < lambda, e0 > 0 and OCR >= 1.")
     if m.stress_model == "hyperbolic" and (m.dc_K <= 0 or m.dc_Kur <= 0 or not 0 < m.dc_Rf <= 1):
         raise ValueError(f"{m.name}: hyperbolic model needs K > 0, Kur > 0 and 0 < Rf <= 1.")
+    if m.stress_model == "hardening_soil" and (m.hs_E50 <= 0 or m.hs_Eur <= 0 or m.hs_pref <= 0
+                                               or not 0 < m.hs_Rf < 1 or not 0 <= m.hs_m <= 1):
+        raise ValueError(f"{m.name}: Hardening Soil needs E50 > 0, Eur > 0, p_ref > 0, 0 < Rf < 1 and 0 <= m <= 1.")
+    if m.cr < 0 or not 0 <= m.phi_r < 90:
+        raise ValueError(f"{m.name}: the rapid drawdown R envelope needs c_R >= 0 and 0 <= phi_R < 90.")
     if min(m.th_k, m.th_k_frozen, m.th_c, m.th_c_frozen) <= 0:
         raise ValueError(f"{m.name}: thermal conductivities and heat capacities must be positive.")
 
@@ -463,7 +480,9 @@ KIND_TABS = {
             ("Time", TIME)],
 }
 
-SLOPE_EXTRA = []
+SLOPE_EXTRA = [("Rapid Drawdown", [
+    ("rapid_drawdown", "Rapid drawdown: three-stage method (Duncan, Wright and Wong)", "bool"),
+    ("drawdown_level", "Reservoir level after drawdown (elevation)", "float", "length")])]
 SLOPE_OPTIMIZATION = [("optimize", "Optimize the critical slip surface (non-circular)", "bool"),
                       ("opt_iterations", "Optimization trials", "int")]
 SLOPE_CONVERGENCE = [("n_slices", "Number of slices", "int")]
@@ -551,6 +570,9 @@ class AnalysisEditor(QWidget):
                 self.time_note.setStyleSheet("color:#666")
                 form.layout().insertRow(0, self.time_note)
             self.tabs.addTab(form, title)
+        self.stage_list = None
+        if a.kind == "stress":
+            self.tabs.addTab(self._stage_tab(), "Construction Stage")
         hint = QLabel("Children use their parents' results: seepage gives pore pressures and flow, stress gives "
                       "stresses for the finite element slope method, dynamic gives Newmark displacements, and "
                       "earlier steps give initial conditions.")
@@ -558,6 +580,32 @@ class AnalysisEditor(QWidget):
         hint.setStyleSheet("color:#666")
         v.addWidget(hint)
         self._type_changed()
+
+    def _stage_tab(self):
+        """Staged construction: tick the regions that exist in this stage."""
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
+        from ..geometry import polygon_area
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        info = QLabel("Tick the regions that exist in this stage. Untick a region to <b>dig it out</b> "
+                      "(excavation) or to say it is <b>not built yet</b> (a fill placed in a later stage). "
+                      "Make each stage a child of the previous one: GeoLab then releases the soil that was dug "
+                      "out, adds the weight of new fill and carries the stresses on. Structures (walls, anchors, "
+                      "geogrids) are chosen per stage in Draw > Structures.")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+        self.stage_list = QListWidget()
+        mats = {m.id: m.name for m in self.p.materials}
+        off = set(self.a.inactive_regions or [])
+        for r in self.p.regions:
+            it = QListWidgetItem(f"Region {r.id}: {mats.get(r.material_id, 'no material')}  "
+                                 f"({abs(polygon_area(r.points)):.1f} {self.p.unit('length')}²)")
+            it.setData(Qt.UserRole, r.id)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Unchecked if r.id in off else Qt.Checked)
+            self.stage_list.addItem(it)
+        lay.addWidget(self.stage_list, 1)
+        return w
 
     # ------------------------------------------------------------------
     def type_value(self):
@@ -746,6 +794,14 @@ class AnalysisEditor(QWidget):
             setattr(a, self.type_attr, self.type_value())
         if a.kind == "slope":
             self._store_slope(a)
+        if self.stage_list is not None:
+            a.inactive_regions = [self.stage_list.item(i).data(Qt.UserRole) for i in range(self.stage_list.count())
+                                  if self.stage_list.item(i).checkState() != Qt.Checked]
+            if len(a.inactive_regions) == len(self.p.regions) and self.p.regions:
+                raise ValueError("At least one region must exist in the stage.")
+        if a.kind == "slope" and a.rapid_drawdown and a.pwp != "piezometric":
+            raise ValueError("Rapid drawdown uses the piezometric line as the reservoir level before drawdown: "
+                             "set Pore Water Pressure to 'Piezometric line'.")
         parent = self.p.analysis(a.parent_id)
         if a.kind == "transport" and (parent is None or parent.kind != "seepage"):
             raise ValueError("Contaminant transport needs a seepage analysis as its parent.")
@@ -1193,7 +1249,7 @@ BC_HELP = {
 
 class BCDialog(QDialog):
     def __init__(self, name="BC", type_="head", value=0.0, parent=None, kinds=None, value2=0.0, fn=None,
-                 analyses=None, project=None, fn2=None, humidity=0.5):
+                 analyses=None, project=None, fn2=None, humidity=0.5, value3=0.0, root_depth=0.0):
         super().__init__(parent)
         self.setWindowTitle("Boundary Condition")
         f = QFormLayout(self)
@@ -1210,6 +1266,11 @@ class BCDialog(QDialog):
         self.fn2.setMaximumHeight(70)
         self.fn2.setPlaceholderText("time (s), second value  per line (e.g. potential evaporation)")
         self.humidity = dspin(humidity, 0, 0.99, 2, 0.05)
+        self.value3 = dspin(value3, 0, 1e12, 10)
+        self.value3.setToolTip("Potential transpiration of the plants (water per unit area per second). "
+                               "Example: 3 mm/day = 3.5e-8 m/s.")
+        self.root_depth = dspin(root_depth, 0, 1e6, 3, 0.1)
+        self.root_depth.setToolTip("Depth of the roots below the ground surface; 0 = bare soil (no plants).")
         self.only = QComboBox()
         self.only.addItem("All analyses", None)
         for a in (project.analyses if project else []):
@@ -1223,6 +1284,8 @@ class BCDialog(QDialog):
         f.addRow("Value vs time", self.fn)
         f.addRow("Second value vs time", self.fn2)
         f.addRow("Air humidity (climate)", self.humidity)
+        f.addRow("Plant transpiration (climate)", self.value3)
+        f.addRow("Root depth (climate, 0 = no plants)", self.root_depth)
         f.addRow("Applies to", self.only)
         self.help = QLabel()
         self.help.setWordWrap(True)
@@ -1251,7 +1314,8 @@ class BCDialog(QDialog):
         only = self.only.currentData()
         return dict(name=self.name.text().strip() or "BC", type=self.type.currentData(), value=self.value.value(),
                     value2=self.value2.value(), fn=getattr(self, "fn_rows", []), analyses=[only] if only else [],
-                    fn2=getattr(self, "fn2_rows", []), humidity=self.humidity.value())
+                    fn2=getattr(self, "fn2_rows", []), humidity=self.humidity.value(),
+                    value3=self.value3.value(), root_depth=self.root_depth.value())
 
 
 class ReinforcementDialog(QDialog):
@@ -1282,6 +1346,61 @@ class ReinforcementDialog(QDialog):
         except ValueError as e:
             QMessageBox.warning(self, "Invalid input", str(e))
             return
+        self.accept()
+
+
+class StructureDialog(QDialog):
+    """Properties of a structural element for stress-deformation analyses."""
+
+    def __init__(self, st=None, parent=None, unit=None, project=None):
+        super().__init__(parent)
+        self.setWindowTitle("Structure (wall, anchor, geogrid)")
+        from ..model import STRUCTURE_TYPES, Structure
+        self.st = copy.deepcopy(st) if st else Structure(id=0, name="", type="beam", points=[])
+        spec = [("name", "Name", "text"), ("type", "Type", "choice", STRUCTURE_TYPES),
+                ("EA", "Axial stiffness EA (per unit width)", "float"),
+                ("EI", "Bending stiffness EI (walls / beams)", "float"),
+                ("spacing", "Out-of-plane spacing (anchors)", "float", "length"),
+                ("prestress", "Prestress force when installed (anchors)", "float", "force")]
+        v = QVBoxLayout(self)
+        tip = QLabel("Walls / beams carry bending and axial force; anchors and struts carry axial force "
+                     "only; geogrids carry tension only. Typical sheet pile: EA = 4e6, EI = 4e4 (kN, m).")
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color:#666")
+        v.addWidget(tip)
+        self.form = Form(spec, unit)
+        self.form.load(self.st)
+        v.addWidget(self.form)
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
+        self.stages = QListWidget()
+        stress = [a for a in (project.analyses if project else []) if a.kind == "stress"]
+        for a in stress:
+            it = QListWidgetItem(a.name)
+            it.setData(Qt.UserRole, a.id)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            on = not self.st.analyses or a.id in self.st.analyses
+            it.setCheckState(Qt.Checked if on else Qt.Unchecked)
+            self.stages.addItem(it)
+        if stress:
+            v.addWidget(QLabel("Present in these stress stages:"))
+            self.stages.setMaximumHeight(120)
+            v.addWidget(self.stages)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.try_accept)
+        bb.rejected.connect(self.reject)
+        v.addWidget(bb)
+
+    def try_accept(self):
+        try:
+            self.form.store(self.st)
+            if self.st.EA <= 0 or self.st.spacing <= 0 or (self.st.type == "beam" and self.st.EI <= 0):
+                raise ValueError("EA, EI (for beams) and spacing must be positive.")
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid input", str(e))
+            return
+        ids = [self.stages.item(i).data(Qt.UserRole) for i in range(self.stages.count())]
+        on = [i for k, i in enumerate(ids) if self.stages.item(k).checkState() == Qt.Checked]
+        self.st.analyses = [] if len(on) == len(ids) else on
         self.accept()
 
 

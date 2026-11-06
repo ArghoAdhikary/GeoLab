@@ -80,6 +80,7 @@ STRESS_MODELS = {
     "elastic_plastic": "Elastic-plastic (Mohr-Coulomb)",
     "cam_clay": "Modified Cam Clay (critical state)",
     "hyperbolic": "Hyperbolic (Duncan-Chang)",
+    "hardening_soil": "Hardening Soil (stress-dependent stiffness)",
     "none": "None (excluded)",
 }
 
@@ -93,7 +94,7 @@ BC_KINDS = {
         "seepage_face": "Potential seepage face",
         "infiltration": "Infiltration with ponding review",
         "free_drainage": "Free drainage (unit gradient)",
-        "climate": "Climate: rainfall (value) and potential evaporation (second value)",
+        "climate": "Climate: rainfall, evaporation and plant transpiration",
     },
     "stress": {
         "fixed_x": "Fixed x",
@@ -169,6 +170,8 @@ class Material:
     unsat_alpha: float = 2.0      # Gardner exponent (1/length) for relative conductivity
     # -- more strength parameters (see strength.py) --
     phi_b: float = 0.0            # suction friction angle (unsaturated strength)
+    cr: float = 0.0               # rapid drawdown: total-stress (R) envelope cohesion from CU tests
+    phi_r: float = 0.0            # rapid drawdown: R envelope friction angle (0 and cr 0 = free draining)
     c_rate: float = 0.0           # undrained strength increase per unit depth below datum
     datum: float = 0.0
     shansep_s: float = 0.22
@@ -204,6 +207,11 @@ class Material:
     dc_Kur: float = 600.0         # unload-reload modulus number
     dc_n: float = 0.5             # modulus exponent
     dc_Rf: float = 0.9            # failure ratio
+    hs_E50: float = 20000.0       # Hardening Soil: secant stiffness at 50 % strength at p_ref
+    hs_Eur: float = 60000.0       # unload-reload stiffness at p_ref
+    hs_m: float = 0.5             # stress exponent
+    hs_pref: float = 100.0        # reference pressure
+    hs_Rf: float = 0.9            # failure ratio
     # -- dynamic --
     damping: float = 0.05
     gamma_ref: float = 0.0        # reference shear strain for equivalent linear (0 = linear)
@@ -269,6 +277,9 @@ class BoundaryCondition:
     analyses: list = field(default_factory=list)     # analysis ids it applies to; empty = all
     fn2: list = field(default_factory=list)          # [[time, value2], ...] (e.g. potential evaporation)
     humidity: float = 0.5                            # climate: relative humidity of the air (0-1)
+    value3: float = 0.0                              # climate: potential transpiration of plants (per unit area)
+    fn3: list = field(default_factory=list)          # [[time, value3], ...]
+    root_depth: float = 0.0                          # climate: depth of the root zone (0 = no plants)
 
     @property
     def kind(self) -> str:
@@ -287,6 +298,9 @@ class BoundaryCondition:
 
     def at2(self, t: float | None) -> float:
         return self._interp(self.fn2, t, self.value2)
+
+    def at3(self, t: float | None) -> float:
+        return self._interp(self.fn3, t, self.value3)
 
     @classmethod
     def from_dict(cls, d: dict) -> "BoundaryCondition":
@@ -310,6 +324,33 @@ class Reinforcement:
     @classmethod
     def from_dict(cls, d: dict) -> "Reinforcement":
         return cls(**_filtered(cls, d))
+
+
+STRUCTURE_TYPES = {
+    "beam": "Beam / wall (bending + axial)",
+    "anchor": "Anchor / strut (axial only)",
+    "geogrid": "Geogrid (tension only)",
+}
+
+
+@dataclass
+class Structure:
+    """Structural element in a stress-deformation analysis, along a polyline of mesh nodes."""
+    id: int
+    name: str
+    type: str                    # beam | anchor | geogrid
+    points: list[list[float]]
+    EA: float = 1e6              # axial stiffness per unit width (force)
+    EI: float = 1e4              # bending stiffness per unit width (force x length^2), beams
+    spacing: float = 1.0         # out-of-plane spacing (anchors); stiffness is divided by it
+    prestress: float = 0.0       # anchors: axial force applied when the anchor is installed
+    analyses: list = field(default_factory=list)   # stages it is active in; empty = all stress stages
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Structure":
+        s = cls(**_filtered(cls, d))
+        s.points = [[float(p[0]), float(p[1])] for p in s.points]
+        return s
 
 
 @dataclass
@@ -398,6 +439,8 @@ class Analysis:
     optimize: bool = False
     opt_iterations: int = 400
     stress_parent_id: int | None = None  # finite element stress method
+    rapid_drawdown: bool = False        # three-stage Duncan-Wright-Wong rapid drawdown
+    drawdown_level: float = 0.0         # reservoir level after drawdown (elevation)
     # finite element analyses (seepage, stress, thermal, transport, air, dynamic)
     mesh_size: float = 1.0
     unsaturated: bool = True
@@ -421,6 +464,8 @@ class Analysis:
     n_eq_iter: int = 6
     # transport
     particles: list = field(default_factory=list)   # [[x, y], ...] for particle tracking
+    # staged construction: regions not present in this stage (excavated or not yet built)
+    inactive_regions: list = field(default_factory=list)
     results: dict | None = None
 
     @classmethod
@@ -449,6 +494,7 @@ class Project:
     reinforcements: list[Reinforcement] = field(default_factory=list)
     flux_sections: list[FluxSection] = field(default_factory=list)
     mesh_lines: list = field(default_factory=list)     # interior lines the mesh follows (e.g. drains)
+    structures: list[Structure] = field(default_factory=list)
     grid_spacing: float = 1.0
 
     # -- lookups -------------------------------------------------------
@@ -503,6 +549,13 @@ class Project:
         self.reinforcements.append(r)
         return r
 
+    def add_structure(self, type: str, points, name: str = "", **kw) -> Structure:
+        sid = self.next_id(self.structures)
+        st = Structure(id=sid, name=name or f"{type.capitalize()} {sid}", type=type,
+                       points=[[float(x), float(y)] for x, y in points], **kw)
+        self.structures.append(st)
+        return st
+
     def add_flux_section(self, name: str, points) -> FluxSection:
         f = FluxSection(id=self.next_id(self.flux_sections), name=name,
                         points=[[float(x), float(y)] for x, y in points])
@@ -535,7 +588,7 @@ class Project:
         p = cls(**{k: v for k, v in _filtered(cls, d).items()
                    if k not in ("materials", "regions", "point_loads", "surcharges",
                                 "boundary_conditions", "analyses", "sketch_texts",
-                                "reinforcements", "flux_sections")})
+                                "reinforcements", "flux_sections", "structures")})
         if p.units not in UNIT_SYSTEMS:
             raise ValueError(f"Unknown unit system: {p.units}")
         p.materials = [Material.from_dict(m) for m in d.get("materials", [])]
@@ -547,6 +600,7 @@ class Project:
         p.sketch_texts = [SketchText(**_filtered(SketchText, t)) for t in d.get("sketch_texts", [])]
         p.reinforcements = [Reinforcement.from_dict(r) for r in d.get("reinforcements", [])]
         p.flux_sections = [FluxSection.from_dict(f) for f in d.get("flux_sections", [])]
+        p.structures = [Structure.from_dict(x) for x in d.get("structures", [])]
         p.piezometric_line = [[float(a), float(b)] for a, b in p.piezometric_line]
         return p
 

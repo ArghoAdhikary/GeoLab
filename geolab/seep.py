@@ -43,7 +43,9 @@ def generate_mesh(project, size: float):
                 x, y = x1 + t * (x2 - x1), y1 + t * (y2 - y1)
                 pts.setdefault(key(x, y), (x, y))
             segs.append((x1, y1, x2, y2))
-    for line in getattr(project, "mesh_lines", []) or []:     # interior lines: nodes along them
+    lines = list(getattr(project, "mesh_lines", []) or [])
+    lines += [st.points for st in getattr(project, "structures", []) or [] if len(st.points) >= 2]
+    for line in lines:     # interior lines (drains, structures): nodes along them
         for (x1, y1), (x2, y2) in zip(line[:-1], line[1:]):
             L = math.hypot(x2 - x1, y2 - y1)
             k = max(1, int(math.ceil(L / size)))
@@ -148,6 +150,16 @@ def evaporation_ratio(hp, air_humidity=0.5):
     return np.clip((hr - ha) / (1.0 - ha), 0.0, 1.0)
 
 
+def feddes_alpha(hp, length_factor=1.0):
+    """Root water uptake reduction (Feddes et al. 1978) from the pressure head: no uptake when
+    saturated, full uptake between -0.25 m and -4 m, falling to zero at wilting (-150 m)."""
+    hp = np.asarray(hp, float) / length_factor            # to metres
+    a = np.ones_like(hp)
+    a = np.where(hp > -0.25, np.clip(-hp / 0.25, 0.0, 1.0), a)
+    a = np.where(hp < -4.0, np.clip((hp + 150.0) / 146.0, 0.0, 1.0), a)
+    return a
+
+
 # ---------------------------------------------------------------------------
 # Solver
 # ---------------------------------------------------------------------------
@@ -189,6 +201,26 @@ class _SeepProblem(DiffusionProblem):
                 self.review_nodes.update(nodes)
             elif bc.type in ("infiltration", "climate"):
                 self.infil_nodes.update(nodes)
+        # plants on climate boundaries: root zone nodes and their share of the potential transpiration
+        self.length_factor = 1.0 if project.units == "metric" else 3.28084
+        self.roots = []
+        for bc, nodes, edges, _m in self.bcs:
+            if bc.type != "climate" or bc.root_depth <= 0 or not (bc.value3 > 0 or bc.fn3):
+                continue
+            xs = [p[0] for p in bc.points]
+            x0, x1 = min(xs), max(xs)
+            px = mesh.nodes[:, 0]
+            inside = (px >= x0 - 1e-9) & (px <= x1 + 1e-9)
+            z = np.where(inside, polyline_y(sorted(bc.points), px) - self.y, -1.0)
+            Lr = bc.root_depth
+            g = np.where((z >= -1e-9) & (z <= Lr), 2.0 * (1.0 - np.clip(z, 0, Lr) / Lr) / Lr, 0.0)
+            w = mesh.lump * g
+            if w.sum() <= 0:
+                raise ValueError(f"Climate boundary '{bc.name}': the root zone has no mesh nodes; "
+                                 "make the root depth larger than the mesh size.")
+            w *= (x1 - x0) / w.sum()          # the whole zone takes up PT x the boundary width
+            idx = np.nonzero(w)[0]
+            self.roots.append((bc, idx, w[idx]))
         if not any(bc.type in ("head", "pressure_head") for bc, *_ in self.bcs) and not self.review_nodes:
             raise ValueError("At least one head or pressure-head boundary condition is required.")
 
@@ -236,9 +268,16 @@ class _SeepProblem(DiffusionProblem):
             elif bc.type == "climate":
                 rain, evap = self.climate_rates(bc, edges, t, h)
                 flux += self.m.edge_load(edges, rain - evap)
+        for bc, idx, w in self.roots:
+            flux[idx] -= self.uptake(bc, idx, w, t, h)
         for i in self.active:
             fixed.setdefault(i, self.y[i])
         return fixed, flux, None
+
+    def uptake(self, bc, idx, w, t, h):
+        """Actual root water uptake (volume per time) at the root zone nodes."""
+        pt = max(bc.at3(t), 0.0)
+        return pt * w * feddes_alpha(h[idx] - self.y[idx], self.length_factor)
 
     def climate_rates(self, bc, edges, t, h):
         """Rainfall and actual evaporation (per unit area) on each edge of a climate boundary."""
@@ -293,7 +332,8 @@ def run_seepage(project, analysis, progress=None, cancel=None, parent_results=No
     S0 = prob.storage(h0)[0]
     net_in = [0.0, 0.0]          # cumulative inflow, previous time
 
-    climate = {"rainfall": 0.0, "evaporation": 0.0, "runoff": 0.0}
+    climate = {"rainfall": 0.0, "evaporation": 0.0, "runoff": 0.0, "transpiration": 0.0,
+               "potential_transpiration": 0.0}
 
     def on_step(k, t, h, react):
         if t is None:
@@ -310,6 +350,9 @@ def run_seepage(project, analysis, progress=None, cancel=None, parent_results=No
             climate["rainfall"] += dt * float(np.sum(rain * L))
             climate["evaporation"] += dt * float(np.sum(evap * L))
             climate["runoff"] += dt * float(sum(-react[i] for i in nodes if i in prob.active and react[i] < 0))
+        for bc, idx, w in prob.roots:
+            climate["transpiration"] += dt * float(prob.uptake(bc, idx, w, t, h).sum())
+            climate["potential_transpiration"] += dt * float(max(bc.at3(t), 0.0) * w.sum())
         saved_t.append(float(t))
         saved_h.append(h.tolist())
         if progress:

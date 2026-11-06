@@ -188,6 +188,13 @@ def _tool(p: QPainter, name: str, s: float):
         p.setPen(QPen(QColor("#555555"), s / 10))
         p.drawLine(QPointF(0.3 * s, 0.5 * s), QPointF(0.92 * s, 0.62 * s))
         p.drawLine(QPointF(0.3 * s, 0.68 * s), QPointF(0.92 * s, 0.8 * s))
+    elif name == "structure":
+        p.setBrush(QBrush(QColor("#f3d98b")))
+        p.drawPolygon(P((0.05, 0.95), (0.95, 0.95), (0.95, 0.3), (0.45, 0.3), (0.45, 0.55), (0.05, 0.55)))
+        p.setPen(QPen(QColor("#3b3b8f"), s / 9))
+        p.drawLine(QPointF(0.45 * s, 0.12 * s), QPointF(0.45 * s, 0.88 * s))
+        p.setPen(QPen(QColor("#a23b1f"), s / 16))
+        p.drawLine(QPointF(0.45 * s, 0.38 * s), QPointF(0.9 * s, 0.6 * s))
     elif name == "flux_section":
         p.setPen(QPen(QColor("#1f5fd6"), s / 12))
         p.drawLine(QPointF(0.5 * s, 0.08 * s), QPointF(0.5 * s, 0.92 * s))

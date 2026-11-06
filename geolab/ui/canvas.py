@@ -24,6 +24,8 @@ MODE_HINTS = {
     "grid": "Draw Slip Surface Grid: click two opposite corners of the grid of centres.",
     "reinforcement": "Draw Reinforcement: click the head (at the slope face), then the far end inside the slope.",
     "flux_section": "Draw Flux Section: click points across the flow; press Enter or right-click to finish.",
+    "structure": "Draw Structure: click along the wall, anchor or geogrid (inside the soil); press Enter or "
+                 "right-click to finish.",
     "text": "Sketch Text: click where the text goes.",
     "pan": "Pan: drag to move the view. Mouse wheel zooms.",
 }
@@ -85,7 +87,7 @@ class Canvas(QWidget):
             pts = [self.view.dev(x, y) for x, y in self.temp]
             for i in range(len(pts) - 1):
                 g.drawLine(pts[i], pts[i + 1])
-            if self.cursor_w and self.mode in ("region", "piezo", "bc", "flux_section", "reinforcement"):
+            if self.cursor_w and self.mode in ("region", "piezo", "bc", "flux_section", "reinforcement", "structure"):
                 g.setPen(QPen(QColor("#d01f1f"), 1, Qt.DashLine))
                 g.drawLine(pts[-1], self.view.dev(*self.cursor_w))
             g.setBrush(QColor("#d01f1f"))
@@ -163,7 +165,7 @@ class Canvas(QWidget):
                 self.finish()
             elif not self.temp or w != self.temp[-1]:
                 self.temp.append(w)
-        elif self.mode in ("piezo", "bc", "flux_section"):
+        elif self.mode in ("piezo", "bc", "flux_section", "structure"):
             if not self.temp or w != self.temp[-1]:
                 self.temp.append(w)
         elif self.mode == "reinforcement":
@@ -285,4 +287,6 @@ class Canvas(QWidget):
             h.add_bc(pts)
         elif self.mode == "flux_section" and len(pts) >= 2:
             h.add_flux_section(pts)
+        elif self.mode == "structure" and len(pts) >= 2:
+            h.add_structure(pts)
         self.update()

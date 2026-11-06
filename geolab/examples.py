@@ -103,6 +103,28 @@ def rapid_drawdown() -> Project:
     return p
 
 
+def rapid_drawdown_dww() -> Project:
+    """Upstream slope of an embankment after a sudden reservoir drawdown (Duncan, Wright and Wong 1990)."""
+    p = new_project()
+    p.title = "Rapid drawdown (Duncan-Wright-Wong)"
+    p.description = ("Reservoir at 16 m falls suddenly to 4 m. The clay fill has no time to drain, so its strength "
+                     "comes from consolidated-undrained tests (R envelope c_R = 2 kPa, phi_R = 10 deg). "
+                     "The result lists the factor of safety of the three stages.")
+    clay = p.materials[0]
+    clay.name, clay.cohesion, clay.phi, clay.unit_weight = "Clay fill", 5.0, 30.0, 20.0
+    clay.cr, clay.phi_r = 2.0, 10.0
+    p.add_region([(0, 0), (90, 0), (90, 18), (60, 18), (6, 0)], clay.id)
+    p.piezometric_line = [[0, 16.0], [54.0, 16.0], [90, 15.0]]
+    a = p.analyses[0]
+    a.name, a.pwp, a.rapid_drawdown, a.drawdown_level = "Upstream slope after drawdown", "piezometric", True, 4.0
+    a.method = "spencer"
+    s_ = a.search
+    s_.mode, s_.entry_x1, s_.entry_x2, s_.exit_x1, s_.exit_x2 = "entry_exit", 50, 70, 8, 30
+    s_.n_entry = s_.n_exit = 8
+    s_.n_radius = 4
+    return p
+
+
 def strip_footing() -> Project:
     """Rigid strip footing pushed into undrained clay: load-settlement to bearing failure."""
     p = new_project(kind="stress")
@@ -261,6 +283,35 @@ def cam_clay_embankment() -> Project:
     return p
 
 
+def braced_excavation() -> Project:
+    """Excavation in two lifts next to an anchored sheet-pile wall (staged construction)."""
+    p = new_project(kind="stress")
+    p.title = "Anchored excavation (staged construction)"
+    p.description = ("Half model of a 6 m deep excavation. Stage 1: in situ stresses. Stage 2: wall installed, "
+                     "dig 3 m. Stage 3: prestressed anchor. Stage 4: dig to 6 m. Look at the wall bending "
+                     "moment, the anchor force and the ground movement behind the wall.")
+    sand = p.materials[0]
+    sand.name, sand.stress_model, sand.cohesion, sand.phi = "Sand", "elastic_plastic", 2.0, 32.0
+    sand.E, sand.nu, sand.unit_weight, sand.psi = 3.0e4, 0.3, 19.0, 2.0
+    top = p.add_region([(0, 17), (10, 17), (10, 20), (0, 20)], sand.id)
+    low = p.add_region([(0, 14), (10, 14), (10, 17), (0, 17)], sand.id)
+    p.add_region([(0, 0), (40, 0), (40, 20), (10, 20), (10, 17), (10, 14), (0, 14)], sand.id)
+    _box_supports(p, 0, 40, 20, 20)
+    a1 = p.analyses[0]
+    a1.name, a1.stress_type, a1.mesh_size = "1. In situ", "insitu", 1.0
+    a2 = p.add_analysis("2. Wall + dig to 3 m", kind="stress", parent_id=a1.id, stress_type="load",
+                        load_steps=4, mesh_size=1.0, inactive_regions=[top.id])
+    a3 = p.add_analysis("3. Anchor (150 kN)", kind="stress", parent_id=a2.id, stress_type="load",
+                        load_steps=2, mesh_size=1.0, inactive_regions=[top.id])
+    a4 = p.add_analysis("4. Dig to 6 m", kind="stress", parent_id=a3.id, stress_type="load",
+                        load_steps=6, mesh_size=1.0, inactive_regions=[top.id, low.id])
+    p.add_structure("beam", [(10, 20), (10, 10)], "Sheet-pile wall", EA=4.0e6, EI=4.0e4,
+                    analyses=[a2.id, a3.id, a4.id])
+    p.add_structure("anchor", [(10, 18), (20, 14)], "Ground anchor", EA=2.0e5, spacing=2.0, prestress=150.0,
+                    analyses=[a3.id, a4.id])
+    return p
+
+
 EXAMPLES = {
     "Homogeneous slope (benchmark)": homogeneous_slope,
     "Layered slope with water table": layered_slope_with_water,
@@ -275,4 +326,6 @@ EXAMPLES = {
     "Soil vapour extraction (air flow)": air_flow,
     "Rainfall and evaporation on a slope": rainfall_slope,
     "Soft clay under a fill (Cam Clay)": cam_clay_embankment,
+    "Anchored excavation (staged)": braced_excavation,
+    "Rapid drawdown (Duncan-Wright-Wong)": rapid_drawdown_dww,
 }

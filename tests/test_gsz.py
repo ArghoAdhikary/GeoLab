@@ -245,3 +245,23 @@ def test_slope_project_export_round_trip(tmp_path):
     assert vars(b.search) == vars(a.search) and q.piezometric_line == p.piezometric_line
     assert [(m.name, m.cohesion, m.phi, m.unit_weight) for m in q.materials] == \
         [(m.name, m.cohesion, m.phi, m.unit_weight) for m in p.materials]
+
+
+def test_seepage_export_round_trip(tmp_path):
+    from geolab.model import new_project
+    p = new_project(kind="seepage")
+    m = p.materials[0]
+    m.hyd_model, m.k_sat = "saturated", 1e-5
+    p.add_region([(0, 0), (20, 0), (20, 6), (0, 10)], m.id)
+    a = p.analyses[0]
+    p.add_bc("Upstream", "head", 9.0, [(0, 0), (0, 10)])
+    p.add_bc("Downstream", "head", 3.0, [(20, 0), (20, 6)])
+    p.add_analysis("Transient", kind="seepage", parent_id=a.id, transient=True, duration=86400.0, n_steps=4)
+    out = tmp_path / "seep.gsz"
+    assert write_gsz(p, out) == []
+    import zipfile
+    xml = zipfile.ZipFile(out).read("seep.xml").decode()
+    assert "<Kind>SEEP/W</Kind>" in xml and "HydHeadvsTime(" in xml and "<Method>Transient</Method>" in xml
+    q = read_gsz(out)
+    assert [(x.kind, x.transient) for x in q.analyses] == [("seepage", False), ("seepage", True)]
+    assert sorted((b.type, b.value) for b in q.boundary_conditions) == [("head", 3.0), ("head", 9.0)]

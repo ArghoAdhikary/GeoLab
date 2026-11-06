@@ -185,6 +185,7 @@ class Renderer:
         if self.mode == "define" or (self.a is not None and self.a.kind != "slope"):
             self.draw_bcs()
         self.draw_reinforcement()
+        self.draw_structures(res if self.mode == "results" and res and res.get("type") == "stress" else None)
         self.draw_flux_sections(field_res if self.mode == "results" else None)
         if self.a and self.a.kind == "slope":
             if self.mode == "results" and res and res.get("type") == "slope":
@@ -210,6 +211,7 @@ class Renderer:
 
     def draw_regions(self, fill=True):
         g = self.g
+        off = set(getattr(self.a, "inactive_regions", None) or []) if self.a is not None and self.a.kind == "stress" else set()
         for r in self.p.regions:
             if len(r.points) < 2:
                 continue
@@ -217,6 +219,18 @@ class Renderer:
             col = QColor(m.color) if m else QColor("#ffffff")
             if not fill:
                 col.setAlpha(0)
+            if r.id in off:
+                g.setBrush(QBrush(QColor(self.c["outline"]), Qt.BDiagPattern))
+                g.setPen(self.pen(self.c["outline"], 1.0, Qt.DashLine))
+                g.drawPolygon(self.poly(r.points))
+                if self.o["labels"] and abs(polygon_area(r.points)) * self.v.s ** 2 > 600:
+                    cx = sum(p[0] for p in r.points) / len(r.points)
+                    cy = sum(p[1] for p in r.points) / len(r.points)
+                    g.setPen(QColor(self.c["text"]))
+                    g.setFont(self.font(9))
+                    d = self.v.dev(cx, cy)
+                    g.drawText(QRectF(d.x() - 90, d.y() - 10, 180, 20), Qt.AlignCenter, "not in this stage")
+                continue
             g.setBrush(QBrush(col))
             sel = self.o["selected_region"] == r.id
             g.setPen(self.pen("#d01f1f" if sel else self.c["outline"], 2.2 if sel else 1.2))
@@ -412,6 +426,10 @@ class Renderer:
                 c.setAlpha(110)
                 g.setPen(self.pen(c, 1))
                 g.drawPolyline(self.poly(self._surface_pts(t["surface"], gp, ext[:2])))
+        dd = res.get("drawdown")
+        if dd and len(dd.get("line_after", [])) >= 2:
+            g.setPen(self.pen("#5aa9ff", 1.6, Qt.DashDotLine))
+            g.drawPolyline(self.poly(dd["line_after"]))
         sx = crit["slice_x"]
         surf = crit["surface"]
         pts = self._surface_pts(surf, gp, (sx[0], sx[-1]))
@@ -494,7 +512,10 @@ class Renderer:
         dev = [v.dev(x, y) for x, y in nodes]
         g.setPen(self.pen(QColor(0, 0, 0, 70), 0.6) if self.o["mesh"] else Qt.NoPen)
         vals = field if per_elem else field[tris].mean(axis=1)
-        for t, val in zip(tris, vals):
+        inactive = res.get("inactive") or [False] * len(tris)
+        for t, val, off in zip(tris, vals, inactive):
+            if off:
+                continue
             g.setBrush(colormap((val - lo) / span) if np.isfinite(val) else QColor("#dddddd"))
             g.drawPolygon(QPolygonF([dev[t[0]], dev[t[1]], dev[t[2]]]))
         if not per_elem and hi > lo:
@@ -563,6 +584,42 @@ class Renderer:
             g.setBrush(QColor("#7a4b00"))
             g.setPen(self.pen("#7a4b00", 1))
             g.drawRect(QRectF(a.x() - 3, a.y() - 3, 6, 6))
+
+    def draw_structures(self, res):
+        """Walls, anchors and geogrids; in the results, their largest axial force and bending moment."""
+        g = self.g
+        aid = getattr(self.a, "id", None)
+        colors = {"beam": "#2d3a8c", "anchor": "#a23b1f", "geogrid": "#1f7a4d"}
+        forces = {s["id"]: s for s in (res or {}).get("structures", []) or []}
+        for st in getattr(self.p, "structures", []) or []:
+            if len(st.points) < 2:
+                continue
+            present = not st.analyses or aid in st.analyses
+            col = QColor(colors.get(st.type, "#333333"))
+            if not present:
+                col.setAlpha(70)
+            width = 3.6 if st.type == "beam" else 2.4
+            style = Qt.DashLine if st.type == "geogrid" else Qt.SolidLine
+            g.setPen(self.pen(col, width, style))
+            g.drawPolyline(self.poly(st.points))
+            if st.type == "anchor":
+                g.setBrush(col)
+                d = self.v.dev(*st.points[0])
+                g.drawRect(QRectF(d.x() - 3.5, d.y() - 3.5, 7, 7))
+            if self.o["labels"]:
+                g.setFont(self.font(8, True))
+                d = self.v.dev(*st.points[-1])
+                txt = st.name
+                f = forces.get(st.id)
+                if f:
+                    u = self.p.unit("force")
+                    txt += f": N = {f['max_N']:.3g} {u}/{self.p.unit('length')}"
+                    if st.type == "beam":
+                        txt += f", M = {f['max_M']:.3g} {u}.{self.p.unit('length')}/{self.p.unit('length')}"
+                elif not present:
+                    txt += " (not in this stage)"
+                g.setPen(col)
+                g.drawText(QPointF(d.x() + 5, d.y() + 12), txt)
 
     def draw_flux_sections(self, res):
         g = self.g

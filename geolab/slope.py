@@ -896,6 +896,107 @@ def evaluate_surface(project, analysis, surface, pwp_fn, gp, method=None, stress
     return s, F, lam, None
 
 
+def drawdown_line(project, analysis, gp):
+    """Water table after a rapid drawdown: the reservoir falls to the drawdown level, the water inside
+    the slope stays where it was (no time to drain), and the slope face stays saturated."""
+    line = sorted(project.piezometric_line)
+    xs = sorted({p[0] for p in line} | {float(x) for x in np.linspace(line[0][0], line[-1][0], 200)})
+    out = []
+    for x in xs:
+        y0 = polyline_y(line, x)
+        g = float(gp.ground(x))
+        out.append([x, float(min(y0, max(analysis.drawdown_level, g)))])
+    return out
+
+
+def _slice_normal_shear(s, F, lam, method, analysis):
+    """Effective normal stress and mobilized shear stress on each slice base (internal slice order)."""
+    rows = slice_table(s, F, lam, method, analysis.interslice, analysis.interslice_points)
+    if s.mirrored:
+        rows = rows[::-1]
+    N = np.array([r["normal"] for r in rows])
+    tau = np.array([r["shear_mobilized"] for r in rows]) / s.l
+    return N / s.l - s.up, tau
+
+
+def rapid_drawdown_fos(project, analysis, surface, gp, method=None):
+    """Three-stage rapid drawdown (Duncan, Wright and Wong 1990).
+
+    1. Before drawdown (piezometric line = high reservoir): effective consolidation stresses on each
+       slice base, sigma'fc and tau_fc, and the consolidation ratio Kc = sigma'1c / sigma'3c.
+    2. After drawdown: undrained strength from the R (total stress) envelope at Kc = 1 and the effective
+       envelope at Kc = Kf, interpolated on Kc. Free-draining materials (no R envelope) stay drained.
+    3. Where the drained strength with the after-drawdown pore pressures is lower, it is used instead.
+    Returns (slice set of the last stage, F, lambda, reason, {stage1, stage2, stage3})."""
+    method = method or analysis.method
+    before = lambda x, y: polyline_y(project.piezometric_line, x) - y
+    after_line = drawdown_line(project, analysis, gp)
+    after = lambda x, y: polyline_y(after_line, x) - y
+    s1, why = build_slices(project, analysis, surface, before, gp)
+    if s1 is None:
+        return None, math.nan, math.nan, why, None
+    F1, lam1 = factor_of_safety(s1, method, analysis.interslice, analysis.interslice_points)
+    if not np.isfinite(F1):
+        return None, math.nan, math.nan, "Solution did not converge.", None
+    sfc, tfc = _slice_normal_shear(s1, F1, lam1, method, analysis)
+    s2, why = build_slices(project, analysis, surface, after, gp)
+    if s2 is None:
+        return None, math.nan, math.nan, why, None
+    # carry the stage 1 stresses to the stage 2 slices by position
+    o1 = np.argsort(s1.xm)
+    sfc2 = np.interp(s2.xm, s1.xm[o1], sfc[o1])
+    tfc2 = np.interp(s2.xm, s1.xm[o1], tfc[o1])
+    undrained = np.zeros(s2.n, bool)
+    cu = np.zeros(s2.n)
+    for i, m in enumerate(s2.mats):
+        if m.cr <= 0 and m.phi_r <= 0:
+            continue                                   # free draining: drained strength throughout
+        sp, cp = math.sin(math.radians(m.phi)), math.cos(math.radians(m.phi))
+        sr, cr_ = math.sin(math.radians(m.phi_r)), math.cos(math.radians(m.phi_r))
+        sig_fc, tau_fc = max(sfc2[i], 0.0), max(tfc2[i], 0.0)
+        s1c = sig_fc + tau_fc * (1 + sp) / max(cp, 1e-9)
+        s3c = sig_fc + tau_fc * (sp - 1) / max(cp, 1e-9)
+        d_r = m.cr * cr_ / (1 - sr)
+        t_k1 = d_r + sig_fc * sr / (1 - sr)
+        d_e = m.cohesion * cp / (1 - sp)
+        t_kf = d_e + sig_fc * sp / (1 - sp)
+        if s3c > 1e-9:
+            Np = (1 + sp) / (1 - sp)
+            Kf = (s3c * Np + 2 * m.cohesion * math.sqrt(Np)) / s3c
+            Kc = min(s1c / s3c, Kf)
+            tff = t_k1 if Kf <= 1 + 1e-9 else ((Kf - Kc) * t_k1 + (Kc - 1) * t_kf) / (Kf - 1)
+        else:
+            tff = t_k1
+        undrained[i] = True
+        cu[i] = max(tff, 0.0)
+    nl = list(s2.nl_idx) if s2.nl_idx is not None else []
+    if undrained.any():
+        s2.c = np.where(undrained, cu, s2.c)
+        s2.tanphi = np.where(undrained, 0.0, s2.tanphi)
+        s2.nl_idx = np.array([i for i in nl if not undrained[i]], int)
+    F2, lam2 = factor_of_safety(s2, method, analysis.interslice, analysis.interslice_points)
+    if not np.isfinite(F2):
+        return None, math.nan, math.nan, "Solution did not converge.", None
+    # stage 3: drained strength (after-drawdown pore pressures) where it is lower
+    sn2, _ = _slice_normal_shear(s2, F2, lam2, method, analysis)
+    s3, _ = build_slices(project, analysis, surface, after, gp)
+    drained_tau = s3.c + np.maximum(sn2, 0.0) * s3.tanphi
+    use_undrained = undrained & (cu <= drained_tau)
+    F3, lam3, s_out = F2, lam2, s2
+    if (undrained & ~use_undrained).any():
+        s3.c = np.where(use_undrained, cu, s3.c)
+        s3.tanphi = np.where(use_undrained, 0.0, s3.tanphi)
+        nl3 = list(s3.nl_idx) if s3.nl_idx is not None else []
+        s3.nl_idx = np.array([i for i in nl3 if not use_undrained[i]], int)
+        F3, lam3 = factor_of_safety(s3, method, analysis.interslice, analysis.interslice_points)
+        s_out = s3
+        if not np.isfinite(F3):
+            return None, math.nan, math.nan, "Solution did not converge.", None
+    stages = {"stage1": float(F1), "stage2": float(F2), "stage3": float(F3),
+              "undrained_slices": int(use_undrained.sum()), "slices": int(s2.n)}
+    return s_out, float(F3), lam3, None, stages
+
+
 def optimize_surface(project, analysis, surface, F, pwp_fn, gp, stress_fn=None, budget=None):
     """Refine a slip surface by moving the vertices of an equivalent polyline (pattern search)."""
     ext = find_extent(gp, surface)
@@ -986,17 +1087,31 @@ def run_slope(project, analysis, seep_results=None, progress=None, cancel=None, 
         raise ValueError("The slip surface search produced no trial surfaces. Check the search settings.")
     trials = []
     best = None
+    best_stages = None
     reasons: dict[str, int] = {}
+    drawdown = bool(getattr(analysis, "rapid_drawdown", False))
+    if drawdown:
+        if len(project.piezometric_line) < 2:
+            raise ValueError("Rapid drawdown needs a piezometric line drawn at the reservoir level before "
+                             "drawdown (Draw > Piezometric Line).")
+        if analysis.method == "finite_element":
+            raise ValueError("Rapid drawdown works with the limit equilibrium methods, not the finite "
+                             "element stress method.")
     for k, surf in enumerate(surfaces):
         if cancel and cancel():
             raise RuntimeError("Cancelled")
-        s, F, lam, why = evaluate_surface(project, analysis, surf, pwp_fn, gp, stress_fn=stress_fn)
+        if drawdown:
+            s, F, lam, why, stages = rapid_drawdown_fos(project, analysis, surf, gp)
+        else:
+            s, F, lam, why = evaluate_surface(project, analysis, surf, pwp_fn, gp, stress_fn=stress_fn)
+            stages = None
         if why:
             reasons[why] = reasons.get(why, 0) + 1
         elif np.isfinite(F):
             trials.append((float(F), surf))
             if best is None or F < best[0]:
                 best = (float(F), surf, lam, s)
+                best_stages = stages
         else:
             reasons["Solution did not converge."] = reasons.get("Solution did not converge.", 0) + 1
         if progress and k % 20 == 0:
@@ -1007,7 +1122,7 @@ def run_slope(project, analysis, seep_results=None, progress=None, cancel=None, 
         res["message"] = "No valid slip surface found. " + "; ".join(f"{v} x {k}" for k, v in reasons.items())
         return res
     F, surf, lam, s = best
-    if analysis.optimize or analysis.search.mode == "auto":
+    if (analysis.optimize or analysis.search.mode == "auto") and not drawdown:
         surf2, F2 = optimize_surface(project, analysis, surf, F, pwp_fn, gp, stress_fn)
         if F2 < F:
             s, F, lam, _ = evaluate_surface(project, analysis, surf2, pwp_fn, gp, stress_fn=stress_fn)
@@ -1034,7 +1149,10 @@ def run_slope(project, analysis, seep_results=None, progress=None, cancel=None, 
         "driving_direction": "right" if s.mirrored else "left",
         "tension_crack": s.crack,
     }
-    if analysis.probabilistic:
+    if drawdown:
+        res["drawdown"] = dict(best_stages or {}, level=float(analysis.drawdown_level),
+                               line_after=drawdown_line(project, analysis, gp))
+    if analysis.probabilistic and not drawdown:
         res["probability"] = run_probabilistic(project, analysis, s)
     if analysis.sensitivity_param:
         res["sensitivity"] = run_sensitivity(project, analysis, s)
