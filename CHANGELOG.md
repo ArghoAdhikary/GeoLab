@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.9.0 - 2026-11-07
+
+- User manual (GeoLab-User-Manual.pdf, 40 pages with screenshots) and ten step-by-step tutorials: first
+  slope, Quick Slope, earth dam, reservoir drawdown, strip footing, consolidation, anchored excavation,
+  earthquake, rainfall, and frost / contamination / air flow. Every number a tutorial quotes is checked
+  against the program by the automated tests.
+- Help > User Manual (Shift+F1) and Help > Tutorials open a help window that stays beside the drawing;
+  each tutorial has a button that opens its model. Help > User Manual (PDF) opens the PDF.
+- Help > Example Files Folder puts every example, already solved, in Documents / GeoLab Examples. The
+  examples are also a release download (GeoLab-examples.zip).
+- Windows: the Intel oneAPI Math Kernel Library (MKL) PARDISO parallel sparse solver for large systems
+  (more than 30 000 unknowns). It factorises 5 to 8 times faster than SuperLU there; a fine-mesh
+  consolidation model solves in 13 s instead of 62 s. Smaller systems keep SciPy's SuperLU, which is the
+  faster of the two at that size. Help > About shows the solver.
+- Start page: links to the tutorials and the manual.
+
 ## 2.8.0 - 2026-11-07
 
 - Staged construction for stress-deformation: each stage can leave out regions (excavated or not built

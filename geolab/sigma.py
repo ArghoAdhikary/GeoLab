@@ -21,7 +21,7 @@ import math
 
 import numpy as np
 from scipy.sparse import coo_matrix, bmat, diags
-from scipy.sparse.linalg import splu
+from .linsolve import factorize as splu
 
 from .fe import GAUSS3, T3, interpolator, t3_shape, t6_shape, time_steps, to_t6
 from .geometry import polyline_y, validate_geometry

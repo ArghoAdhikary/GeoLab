@@ -226,9 +226,10 @@ class HomePage(QWidget):
         v.addSpacing(6)
         S = QStyle
         for text, action, icon in (("Read the quick guide for new users", "guide", S.SP_MessageBoxQuestion),
+                                   ("Follow a step-by-step tutorial", "tutorials", S.SP_ArrowForward),
                                    ("Open a worked example project", "example_first", S.SP_DirOpenIcon),
                                    ("Build a slope from a description with AI", "ai", S.SP_ComputerIcon),
-                                   ("Read the full documentation online", "docs", S.SP_FileDialogDetailedView),
+                                   ("Read the user manual", "manual", S.SP_FileDialogDetailedView),
                                    ("Report a problem or ask for a feature", "issues", S.SP_MessageBoxInformation)):
             b = QPushButton(f"  {text}")
             b.setObjectName("link")

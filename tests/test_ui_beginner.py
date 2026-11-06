@@ -125,3 +125,30 @@ def test_material_and_bc_dialogs_have_the_new_fields(win, app):
     assert pr["value3"] == pytest.approx(3e-8) and pr["root_depth"] == 0.5
     import shiboken6
     shiboken6.delete(d)
+
+
+def test_help_window_tutorials_and_examples(win, app, tmp_path, monkeypatch):
+    from geolab.ui import helpview
+    opened = []
+    monkeypatch.setattr(helpview.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+    w = win.show_help(tutorials=True)
+    app.processEvents()
+    kind, page = w.current()
+    assert kind == "tutorial" and page["title"].startswith("Tutorial 1")
+    assert "Tutorial 1" in w.view.toPlainText() and "<!--" not in w.view.toPlainText()
+    assert w.ex_btn.isVisible()
+    w.ex_btn.click()                                   # opens the tutorial's example in the main window
+    assert win.project.title.startswith("Homogeneous slope")
+    w.show_page(len(w.pages) - 9)                       # tutorial 2: Quick Slope inputs
+    win.dirty = False
+    w.ex_btn.click()
+    assert len(win.project.regions) == 2 and win.project.piezometric_line
+    win.dirty = False
+    w.show_page(0)
+    assert w.current()[0] == "manual" and not w.ex_btn.isVisible()
+    # example files go to Documents\GeoLab Examples (here a temporary folder)
+    monkeypatch.setattr(helpview, "examples_target", lambda: tmp_path / "GeoLab Examples")
+    win.open_examples_folder()
+    files = sorted((tmp_path / "GeoLab Examples").glob("*.slab"))
+    assert len(files) >= 15 and opened and opened[-1].endswith("GeoLab Examples")
+    w.close()

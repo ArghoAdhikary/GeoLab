@@ -12,7 +12,7 @@ import math
 
 import numpy as np
 from scipy.sparse import coo_matrix, diags
-from scipy.sparse.linalg import splu
+from .linsolve import factorize as splu
 
 from .fe import T3, interpolator, time_steps
 from .geometry import point_in_polygon, validate_geometry

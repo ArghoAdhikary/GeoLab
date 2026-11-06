@@ -30,6 +30,9 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q
+      - name: Manual, tutorials and example files
+        if: runner.os == 'Windows'
+        run: python build_docs.py
       - name: Build app
         run: python build.py
       - name: Package (Windows installer + portable)
@@ -40,6 +43,7 @@ jobs:
           New-Item -ItemType Directory -Force release, stage | Out-Null
           Copy-Item dist/GeoLab stage/GeoLab -Recurse
           Copy-Item installer/portable.txt stage/GeoLab/portable.txt
+          Copy-Item build/help/GeoLab-User-Manual.pdf stage/GeoLab/GeoLab-User-Manual.pdf
           Compress-Archive -Path stage/GeoLab -DestinationPath release/GeoLab-windows-portable.zip
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }

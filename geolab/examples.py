@@ -329,3 +329,36 @@ EXAMPLES = {
     "Anchored excavation (staged)": braced_excavation,
     "Rapid drawdown (Duncan-Wright-Wong)": rapid_drawdown_dww,
 }
+
+
+def example_file_name(name: str) -> str:
+    """'Earth dam: seepage + stability' -> '03 Earth dam - seepage + stability.slab'."""
+    i = list(EXAMPLES).index(name) + 1
+    safe = "".join(ch if ch.isalnum() or ch in " +-()," else " - " if ch == ":" else " " for ch in name)
+    return f"{i:02d} {' '.join(safe.split())}.slab"
+
+
+def write_example_files(folder, solve: bool = True, overwrite: bool = True, progress=None) -> list:
+    """Save every example in folder as a .slab file, solved (with results) when solve is True."""
+    from pathlib import Path
+
+    from .fileio import save_project
+    from .solver import solve_all
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    out = []
+    for name, make in EXAMPLES.items():
+        path = folder / example_file_name(name)
+        if path.exists() and not overwrite:
+            out.append(path)
+            continue
+        p = make()
+        if solve:
+            errors = [e for e in solve_all(p) if e[1]]
+            if errors:
+                raise RuntimeError(f"{name}: {errors}")
+        save_project(p, path, include_results=solve)
+        out.append(path)
+        if progress:
+            progress(name)
+    return out

@@ -14,7 +14,9 @@ import math
 
 import numpy as np
 from scipy.sparse import coo_matrix, diags
-from scipy.sparse.linalg import eigsh, splu
+from scipy.sparse.linalg import eigsh
+
+from .linsolve import factorize as splu
 
 from .fe import GAUSS6, t6_shape
 from .geometry import validate_geometry

@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geolab"
-version = "2.8.0"
+version = "2.9.0"
 description = "2D geotechnical analysis: slope stability, seepage, stress-deformation, consolidation, earthquake, heat transfer, contaminant transport and air flow"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-dependencies = ["PySide6>=6.6", "numpy>=1.24", "scipy>=1.10", "anthropic>=0.80"]
+dependencies = ["PySide6>=6.6", "numpy>=1.24", "scipy>=1.10", "anthropic>=0.80",
+                "pypardiso>=0.4.6; platform_system == 'Windows'"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pyinstaller>=6"]
@@ -18,7 +19,10 @@ dev = ["pytest>=8", "pyinstaller>=6"]
 geolab = "geolab.__main__:main"
 
 [tool.setuptools]
-packages = ["geolab", "geolab.ui"]
+packages = ["geolab", "geolab.ui", "geolab.help"]
+
+[tool.setuptools.package-data]
+"geolab.help" = ["manual/*.md", "tutorials/*.md", "img/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

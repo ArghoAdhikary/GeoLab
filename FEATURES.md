@@ -98,6 +98,14 @@ directly with another vendor's software.
 | GeoStudio export of SEEP/W analyses (steady and transient) and hydraulic boundaries (head as HydHeadvsTime, pressure head, unit / total flux, seepage face, infiltration) | exported file opened by GeoStudio 2025.2 GeoCmd: no warnings, recognised as SEEP/W, regions and points verified (solving needs the GUI to mesh it, and a SEEP/W licence) |
 | Beginner help: step guide above the drawing (ticks done steps, highlights the next, one-click tools), Quick Slope dialog (slope from height, steepness, layers, water, load), tooltips on every drawing tool | `test_ui_beginner.py` |
 
+### Added in 2.9.0 (documentation, examples, MKL solver)
+
+| Feature | Verified by |
+|---|---|
+| User manual (10 chapters) and 10 tutorials, in the app (Help > User Manual, Tutorials) and as a PDF with screenshots | every number quoted in a tutorial is recomputed and compared (`test_help.py`); help window opens tutorial models (`test_ui_beginner.py`) |
+| Example files: every example solved and saved as .slab (Help > Example Files Folder, GeoLab-examples.zip) | files written and read back (`test_help.py`) |
+| Intel MKL PARDISO sparse direct solver on Windows for systems above 30 000 unknowns; SciPy SuperLU below that, on macOS and on phones | same solution to round-off (residual ~1e-15); full test suite passes with MKL loaded; factorisation 5-8 times faster at 50 000-200 000 unknowns |
+
 ## Not implemented
 
 | Feature | Notes |

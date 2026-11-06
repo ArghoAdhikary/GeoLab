@@ -43,6 +43,8 @@ From the [Releases](https://github.com/ArghoAdhikary/GeoLab/releases) page:
 | `GeoLab-macos.zip` | macOS: unzip and open `GeoLab.app` |
 | `GeoLab-android.apk` | Android phones and tablets (GeoLab Mobile) |
 | `GeoLab-ios-unsigned.ipa` | iPhone and iPad (GeoLab Mobile), unsigned: see below |
+| `GeoLab-User-Manual.pdf` | The user manual and ten tutorials (also inside the Windows app: Help > User Manual) |
+| `GeoLab-examples.zip` | Every example project, solved, as `.slab` files |
 
 The desktop builds are not code-signed: on Windows choose *More info > Run anyway*; on macOS right-click
 the app and choose *Open* the first time.
@@ -83,9 +85,15 @@ pip install pyinstaller
 ```bash
 python build.py
 ```
-The result is `dist/GeoLab/GeoLab.exe` on Windows or `dist/GeoLab.app` on macOS.
+The result is `dist/GeoLab/GeoLab.exe` on Windows or `dist/GeoLab.app` on macOS. Run
+`python build_docs.py` first to include the PDF manual, the screenshots and the solved example files.
+On Windows, `pip install pypardiso` before building adds the Intel MKL PARDISO solver (used for systems
+with more than 30 000 unknowns).
 
 ## Using it
+
+The full manual and ten tutorials are in **Help > User Manual** and **Help > Tutorials** (and in
+`GeoLab-User-Manual.pdf` on the releases page). In short:
 
 1. The start page offers a new slope or seepage project, examples, recent files and the AI builder.
 2. **Draw > Regions**: click the corners of each soil layer (snaps to the grid and to existing points);

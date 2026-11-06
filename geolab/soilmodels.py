@@ -22,7 +22,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from scipy.sparse.linalg import splu
+from .linsolve import factorize as splu
 
 from .sigma import M_VEC, mc_function, mc_gradient
 

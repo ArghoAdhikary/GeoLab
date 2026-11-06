@@ -34,6 +34,7 @@ Source: "..\dist\GeoLab\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 
 [Icons]
 Name: "{group}\GeoLab"; Filename: "{app}\GeoLab.exe"
+Name: "{group}\GeoLab User Manual"; Filename: "{app}\_internal\help\GeoLab-User-Manual.pdf"; Check: FileExists(ExpandConstant('{app}\_internal\help\GeoLab-User-Manual.pdf'))
 Name: "{group}\Uninstall GeoLab"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\GeoLab"; Filename: "{app}\GeoLab.exe"; Tasks: desktopicon
 

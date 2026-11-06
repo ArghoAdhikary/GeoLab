@@ -318,6 +318,13 @@ class MainWindow(QMainWindow):
         self.a_reset = A("&Reset Window Layout", self.reset_layout)
         self.a_start = A("&Start Page", self.show_start)
         self.a_guide = A("&Quick Guide", self.quick_guide, "F1")
+        self.a_help = A("&User Manual...", lambda: self.show_help(), "Shift+F1",
+                        tip="The full manual: every tool, every analysis and how to read the results")
+        self.a_tutorials = A("&Tutorials...", lambda: self.show_help(tutorials=True),
+                             tip="Step-by-step tutorials, each with its finished model")
+        self.a_pdf_manual = A("User Manual (&PDF)", self.open_pdf_manual)
+        self.a_ex_folder = A("&Example Files Folder", self.open_examples_folder,
+                             tip="Every example as a .slab file (solved) in Documents / GeoLab Examples")
         self.a_about = A("&About", self.about)
 
     def _build_menus(self):
@@ -411,6 +418,11 @@ class MainWindow(QMainWindow):
 
         m = mb.addMenu("&Help")
         m.addAction(self.a_guide)
+        m.addAction(self.a_help)
+        m.addAction(self.a_tutorials)
+        m.addAction(self.a_pdf_manual)
+        m.addAction(self.a_ex_folder)
+        m.addSeparator()
         m.addAction(self.a_chat)
         m.addAction(self.a_ai)
         m.addSeparator()
@@ -1796,6 +1808,10 @@ class MainWindow(QMainWindow):
             self.quick_slope()
         elif action == "guide":
             self.quick_guide()
+        elif action == "tutorials":
+            self.show_help(tutorials=True)
+        elif action == "manual":
+            self.show_help()
         elif action in ("docs", "issues"):
             from PySide6.QtCore import QUrl
             from PySide6.QtGui import QDesktopServices
@@ -1838,6 +1854,47 @@ class MainWindow(QMainWindow):
         win.show()
         return win
 
+    def show_help(self, tutorials=False, page=None):
+        from .helpview import HelpWindow
+        w = getattr(self, "_help_window", None)
+        if w is None:
+            w = HelpWindow(self)
+            w.open_example.connect(self.open_example)
+            w.open_quick.connect(self._open_quick_params)
+            self._help_window = w
+        if tutorials:
+            w.show_tutorials()
+        elif page is not None:
+            w.show_page(page)
+        w.show()
+        w.raise_()
+        w.activateWindow()
+        return w
+
+    def _open_quick_params(self, q):
+        from ..quick import quick_slope
+        if not self.maybe_save():
+            return
+        self.set_project(quick_slope(q), dirty=True)
+        self.log_msg("Built the tutorial's Quick Slope model")
+
+    def open_pdf_manual(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from .. import help as docs
+        if docs.pdf_path() is None:
+            self.show_help()
+            QMessageBox.information(self, "User manual", "The PDF manual comes with the installed program and "
+                                    "every GitHub release (GeoLab-User-Manual.pdf). The same text is shown here.")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(docs.pdf_path())))
+
+    def open_examples_folder(self):
+        from .helpview import open_examples_folder
+        r = open_examples_folder(self)
+        if r:
+            self.log_msg(f"{r[1]} example files in {r[0]}")
+
     def quick_guide(self):
         TextDialog("Quick Guide", GUIDE, self).exec()
 
@@ -1846,7 +1903,8 @@ class MainWindow(QMainWindow):
                           f"<b>{APP_NAME} {__version__}</b><br>2D geotechnical analysis: slope stability, "
                           "seepage, stress-deformation and consolidation, earthquake response, heat transfer "
                           "with freezing, contaminant transport and air flow.<br><br>"
-                          f"Python {sys.version.split()[0]}, Qt for Python.<br>MIT License.")
+                          f"Python {sys.version.split()[0]}, Qt for Python, NumPy, SciPy.<br>"
+                          f"Sparse solver: {solver_text()}<br>MIT License.")
 
     def closeEvent(self, e):
         if self.worker is not None:
@@ -1859,6 +1917,14 @@ class MainWindow(QMainWindow):
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())
         e.accept()
+
+
+def solver_text() -> str:
+    from .. import linsolve
+    if linsolve.backend().startswith("Intel"):
+        return (f"SciPy SuperLU, and Intel MKL PARDISO (parallel) for systems with more than "
+                f"{linsolve.PARALLEL_FROM:,} unknowns")
+    return "SciPy SuperLU"
 
 
 class TextEditDialog(QDialog):
@@ -1887,6 +1953,9 @@ GUIDE = """GeoLab quick guide
    - The step guide above the drawing shows the steps of the selected analysis. The blue step is the
      next one; click it to open the right tool. Ticked steps are done. View > Show Step Guide hides it.
    - Hover over any drawing tool for a one-line explanation.
+   - Help > Tutorials: ten step-by-step tutorials (first slope, dam, footing, excavation, earthquake...),
+     each with its finished model. Help > User Manual (Shift+F1) explains every tool and analysis.
+     Help > Example Files Folder puts all examples, solved, in Documents / GeoLab Examples.
 
 1. Define the problem
    - File > New Project: pick the first analysis type (slope, seepage, stress, dynamic, thermal,

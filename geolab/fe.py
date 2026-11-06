@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 from scipy.sparse import coo_matrix
-from scipy.sparse.linalg import spsolve
+from .linsolve import solve as spsolve
 
 from .geometry import dist_point_polyline
 
