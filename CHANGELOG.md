@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.5.1 - 2026-11-06
+
+- Entry and exit slip surface search now matches GeoStudio SLOPE/W: each trial circle slides only
+  along its arc between the entry and exit points (a large circle that dips below the ground again
+  beyond the toe no longer drags that extra length into the sliding mass), and radius increments
+  are spaced by evenly increasing arc depth below the entry-exit chord. The example Slope project now
+  gives F = 1.224 against GeoStudio's 1.225, with the same critical circle.
+- Tension crack: the crack now forms where the slip surface is at least the crack depth deep (it was
+  checked one slice too far towards the crest).
+
 ## 2.5.0 - 2026-11-06
 
 - GeoStudio slope stability (SLOPE/W) projects open and solve: limit equilibrium method, piezometric

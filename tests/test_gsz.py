@@ -226,8 +226,13 @@ def test_import_slope_project_and_solve(tmp_path):
     names = {m.id: m.name for m in p.materials}
     assert [names[r.material_id] for r in p.regions] == ["clay", "sand"]
     from stratalab.solver import solve
-    fos = solve(p, a)["critical"]["fos"]
-    assert 1.15 < fos < 1.35          # toe circle through the sand; 1.24 with this search
+    crit = solve(p, a)["critical"]
+    # GeoStudio 2026.1 (SLOPE/W, Morgenstern-Price) gives 1.225 for this model: circle centre
+    # (8.0, 41.35), R 32.1, entering the crest at x = 32 and leaving at the toe x = 15
+    assert abs(crit["fos"] - 1.225) < 0.01
+    sf = crit["surface"]
+    assert abs(sf["x1"] - 15) < 0.01 and abs(sf["x2"] - 32) < 0.01
+    assert abs(sf["xc"] - 8.0) < 1.5 and abs(sf["R"] - 32.1) < 2.0
 
 
 def test_slope_project_export_round_trip(tmp_path):

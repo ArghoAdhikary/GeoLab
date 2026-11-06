@@ -31,8 +31,13 @@ ALL_LE_METHODS = ("ordinary", "bishop", "janbu", "janbu_corrected", "janbu_gener
 # ---------------------------------------------------------------------------
 # Slip surfaces
 # ---------------------------------------------------------------------------
-def circle_surface(xc, yc, R) -> dict:
-    return {"type": "circle", "xc": float(xc), "yc": float(yc), "R": float(R)}
+def circle_surface(xc, yc, R, x1=None, x2=None) -> dict:
+    """Circular slip surface. With x1/x2 only the arc between those x (an entry and an exit point) slides,
+    as in an entry-and-exit search; the circle may dip below the ground again beyond the exit."""
+    s = {"type": "circle", "xc": float(xc), "yc": float(yc), "R": float(R)}
+    if x1 is not None and x2 is not None:
+        s["x1"], s["x2"] = float(min(x1, x2)), float(max(x1, x2))
+    return s
 
 
 def polyline_surface(points) -> dict:
@@ -43,10 +48,15 @@ def _surface_fn(surface):
     if surface["type"] == "circle":
         xc, yc, R = surface["xc"], surface["yc"], surface["R"]
 
+        a1, a2 = surface.get("x1"), surface.get("x2")
+
         def ys(x):
             x = np.asarray(x, dtype=float)
             d = np.clip(R * R - (x - xc) ** 2, 0.0, None)
-            return yc - np.sqrt(d)
+            y = yc - np.sqrt(d)
+            if a1 is not None:  # outside the entry-exit arc the surface is above the ground
+                y = np.where((x < a1) | (x > a2), max(yc, y.max() if y.size else yc) + R, y)
+            return y
 
         return ys, xc - R, xc + R
     pts = sorted(surface["points"], key=lambda p: p[0])
@@ -315,7 +325,7 @@ def _tension_crack(s: SliceSet, analysis):
     m = s.n
     while m > 2:
         k = m - 1
-        deep = (s.ytop[k] - s.yb[k]) < dc if dc > 0 else False
+        deep = (s.ytb[k + 1] - s.ysb[k + 1]) < dc if dc > 0 else False  # depth at the present end face
         steep = math.degrees(s.alpha[k]) > ang if ang > 0 else False
         if not (deep or steep):
             break
@@ -820,7 +830,10 @@ def candidate_surfaces(project, analysis, gp: GroundProfile):
             e1, e2, x1, x2 = st.entry_x1, st.entry_x2, st.exit_x1, st.exit_x2
         ex = np.linspace(e1, e2, max(1, st.n_entry))
         xx = np.linspace(x1, x2, max(1, st.n_exit))
-        thetas = np.radians(np.linspace(12.0, 75.0, max(1, st.n_radius)))
+        # radii as SLOPE/W spaces them: evenly spaced arc depths (sagitta) below the entry-exit chord,
+        # from about 1.5 % to 28 % of the chord length
+        nr = max(1, st.n_radius)
+        sags = np.linspace(0.0145, 0.0145 + 0.262, nr) if nr > 1 else np.array([0.14])
         for a in ex:
             p1 = np.array([a, float(gp.ground(a))])
             for c in xx:
@@ -833,11 +846,11 @@ def candidate_surfaces(project, analysis, gp: GroundProfile):
                 nrm = np.array([-chord[1], chord[0]]) / L
                 if nrm[1] < 0:
                     nrm = -nrm
-                for th in thetas:
-                    R = 0.5 * L / math.sin(th)
-                    d = math.sqrt(max(R * R - 0.25 * L * L, 0.0))
-                    cx, cy = mid + nrm * d
-                    out.append(circle_surface(cx, cy, R))
+                for k in sags:
+                    sag = k * L
+                    R = (0.25 * L * L + sag * sag) / (2.0 * sag)
+                    cx, cy = mid + nrm * (R - sag)
+                    out.append(circle_surface(cx, cy, R, p1[0], p2[0]))
     elif mode == "block":
         left = _grid(*st.block_left, st.block_n, st.block_n)
         right = _grid(*st.block_right, st.block_n, st.block_n)
