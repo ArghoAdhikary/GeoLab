@@ -16,26 +16,37 @@ KIND_TITLES = {"slope": "Slope stability", "seepage": "Seepage", "stress": "Stre
                "air": "Air flow"}
 
 STYLE = """
-#home { background: #eeeeee; }
-#card { background: white; border-radius: 4px; }
+#home { background: %(page)s; }
+#card { background: %(card)s; border-radius: 4px; }
 #big { background: #4a8fe7; color: white; font-size: 20pt; border: none; border-radius: 2px;
        text-align: left; padding: 10px 22px; }
 #big:hover { background: #3b7fd6; }
 #big:pressed { background: #2f6cbd; }
-#heading { font-size: 11pt; font-weight: 600; color: #444; }
-#kindbtn { background: #f1f1f1; border: none; border-radius: 3px; text-align: left; padding: 6px 10px;
-           font-size: 11pt; color: #222; }
-#kindbtn:hover { background: #e2ecfb; }
-#kindbtn:checked { background: #d3e3fa; }
+#heading { font-size: 11pt; font-weight: 600; color: %(head)s; }
+#kindbtn { background: %(field)s; border: none; border-radius: 3px; text-align: left; padding: 6px 10px;
+           font-size: 11pt; color: %(text)s; }
+#kindbtn:hover { background: %(hover)s; }
+#kindbtn:checked { background: %(checked)s; }
 #tag { color: #888; font-size: 9pt; }
-#link { border: none; background: transparent; color: #555; font-size: 11pt; text-align: left; padding: 4px; }
-#link:hover { color: #1d5fbf; text-decoration: underline; }
+#link { border: none; background: transparent; color: %(muted)s; font-size: 11pt; text-align: left; padding: 4px; }
+#link:hover { color: %(link)s; text-decoration: underline; }
 #banner { background: #5a5a5a; color: white; font-size: 10.5pt; padding: 8px 14px; }
-QComboBox#field { background: #f1f1f1; border: none; padding: 6px 10px; font-size: 11pt; min-height: 22px; }
-QListWidget#recent { border: none; font-size: 11pt; color: #555; }
+QComboBox#field { background: %(field)s; color: %(text)s; border: none; padding: 6px 10px; font-size: 11pt;
+                  min-height: 22px; }
+QListWidget#recent { border: none; font-size: 11pt; color: %(muted)s; background: %(card)s; }
 QListWidget#recent::item { padding: 6px 2px; }
-QListWidget#recent::item:hover { color: #1d5fbf; background: transparent; }
+QListWidget#recent::item:hover { color: %(link)s; background: transparent; }
+QScrollArea#cardscroll, QScrollArea#cardscroll > QWidget > QWidget { background: %(card)s; }
 """
+
+COLORS = {
+    False: {"page": "#eeeeee", "card": "#ffffff", "head": "#444444", "field": "#f1f1f1", "text": "#222222",
+            "hover": "#e2ecfb", "checked": "#d3e3fa", "muted": "#555555", "link": "#1d5fbf",
+            "title": "#333333", "version": "#666666", "badge": "color:#555; border:1px solid #bbb; background:#f6f6f6"},
+    True: {"page": "#1b1c1f", "card": "#2b2d30", "head": "#d0d0d0", "field": "#35373b", "text": "#e6e6e6",
+           "hover": "#33415a", "checked": "#2f4a73", "muted": "#b8bbc0", "link": "#6aa6ff",
+           "title": "#eeeeee", "version": "#a0a0a0", "badge": "color:#c8c8c8; border:1px solid #555; background:#35373b"},
+}
 
 
 def _heading(text):
@@ -53,7 +64,7 @@ class HomePage(QWidget):
         super().__init__(parent)
         self.setObjectName("home")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(STYLE)
+        self._dark = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -65,12 +76,10 @@ class HomePage(QWidget):
         logo = QLabel()
         logo.setPixmap(kind_pixmap("slope", 30))
         top.addWidget(logo)
-        title = QLabel(f"<span style='font-size:19pt;color:#333'><b>{APP_NAME}</b> "
-                       f"<span style='color:#666'>{__version__}</span></span>")
+        self.title = title = QLabel()
         top.addWidget(title)
         top.addSpacing(30)
-        edition = QLabel("Free and open source (MIT)")
-        edition.setStyleSheet("color:#555; border:1px solid #bbb; background:#f6f6f6; padding:3px 10px")
+        self.edition = edition = QLabel("Free and open source (MIT)")
         top.addWidget(edition)
         top.addStretch(1)
         lay.addLayout(top)
@@ -89,6 +98,16 @@ class HomePage(QWidget):
         banner.setObjectName("banner")
         banner.setWordWrap(True)
         outer.addWidget(banner)
+        self.set_dark(False)
+
+    def set_dark(self, dark: bool):
+        """Restyle the start page for the day (light) or night (dark) theme."""
+        self._dark = bool(dark)
+        c = COLORS[self._dark]
+        self.setStyleSheet(STYLE % c)
+        self.title.setText(f"<span style='font-size:19pt;color:{c['title']}'><b>{APP_NAME}</b> "
+                           f"<span style='color:{c['version']}'>{__version__}</span></span>")
+        self.edition.setStyleSheet(c["badge"] + "; padding:3px 10px")
 
     # ------------------------------------------------------------------
     def _card(self):
@@ -162,7 +181,7 @@ class HomePage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: white; }")
+        scroll.setObjectName("cardscroll")
         v.addWidget(scroll, 1)
         return card
 

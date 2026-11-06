@@ -14,7 +14,12 @@
 - **Thermal** (with freezing and thawing), **contaminant transport** (with particle tracking) and **air flow**.
 - Analyses are linked: seepage feeds slope stability, stress and transport; stresses feed the finite
   element slope method; earthquakes feed Newmark displacement.
+- **AI Assistant chat**: a round chat button in the bottom-right corner opens a small chat box or a
+  full side panel. Ask it to build slopes, change the open model, solve it or explain the result. It
+  works with Claude or ChatGPT (API key), any OpenAI-compatible service (Gemini, OpenRouter, DeepSeek,
+  Ollama, LM Studio...), or your Claude / ChatGPT account through the Claude Code or Codex app.
 - **AI Slope Builder**: describe a slope in plain language and Claude sets up the model.
+- **Light, Dark and Auto themes** (View > Theme): day and night colours, Auto follows the system.
 - Opens GeoStudio `.gsz` files (geometry, materials, slope, stress and seepage analyses, piezometric line, slip surface entry and exit, boundary conditions) and exports them
   (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, stress / consolidation analyses and their boundaries).
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
@@ -67,6 +72,22 @@ The result is `dist/StrataLab/StrataLab.exe` on Windows or `dist/StrataLab.app` 
    Graph** show the details.
 
 Help > Quick Guide inside the app has the full list of tools and shortcuts.
+
+### AI Assistant chat
+Turn it on or off and choose the AI in Edit > Preferences > AI Assistant:
+
+| Service | What you need |
+|---|---|
+| Claude (Anthropic API) | an API key from console.anthropic.com |
+| ChatGPT (OpenAI API) | an API key from platform.openai.com |
+| Other AI (OpenAI-compatible) | the server address and model (presets for Gemini, OpenRouter, DeepSeek, Groq, Mistral, Ollama, LM Studio) and a key if the service needs one |
+| Claude account | Claude Code installed and signed in once (`claude`); no key |
+| ChatGPT account | Codex installed and signed in once (`codex`); no key |
+
+The chat has three sizes: the round chat head (minimised), a small chat box that opens from it, and a
+side panel on the right (expand button). The assistant sees a summary of the open model (materials,
+coordinates, water table, results). Its changes are checked like your own input, come as one undo
+step, and it never invents a factor of safety: it asks StrataLab to solve and reports the result.
 
 ### AI Slope Builder
 Needs an Anthropic API key: paste it in the dialog (optionally remembered) or set `ANTHROPIC_API_KEY`.

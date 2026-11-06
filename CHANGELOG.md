@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.6.0 - 2026-11-06
+
+- AI Assistant chat. A round chat head sits in the bottom-right corner; clicking it opens a small chat
+  box, which expands into a side panel on the right and minimises back to the chat head. The assistant
+  builds slope models (several at once, extra ones in new windows), edits the open model (materials,
+  water table, method, surcharges, seismic load, title), solves it and reports the factor of safety.
+  Every change is validated and undoable in one step.
+- The assistant works with any AI: Claude (Anthropic API key), ChatGPT (OpenAI API key), any
+  OpenAI-compatible service (Google Gemini, OpenRouter, DeepSeek, Groq, Mistral, Ollama, LM Studio)
+  or a Claude / ChatGPT account through the Claude Code or Codex command line app, with no API key.
+- Edit > Preferences: turn the chat on or off, choose the AI service, model, key or server address,
+  and test the connection.
+- Light (day), Dark (night) and Auto themes (View > Theme or Preferences). Auto follows the operating
+  system and switches live. The drawing, start page, icons and chat follow the theme; printing and PDF
+  stay on white paper.
+
 ## 2.5.1 - 2026-11-06
 
 - Entry and exit slip surface search now matches GeoStudio SLOPE/W: each trial circle slides only

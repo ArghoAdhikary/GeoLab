@@ -79,6 +79,8 @@ directly with another vendor's software.
 | GeoStudio `.gsz` open: geometry incl. interior lines (drains), materials (stress, hydraulic, compressibility) and region assignments, analyses (kind, method, parent, duration, steps), boundary conditions with the analyses that use them | two real GeoStudio 2025 files imported; imported consolidation solves; `test_gsz.py` |
 | GeoStudio `.gsz` export: geometry, materials, in situ and consolidation stress analyses, fixed / load / drainage boundaries; anything else is listed as not written | real project exported, passed through GeoStudio's GeoCmd and read back identical (regions, materials, analyses, boundaries) |
 | AI Slope Builder (Claude) | fake client only |
+| AI Assistant chat (Claude, OpenAI, OpenAI-compatible, Claude Code / Codex accounts) | fake API clients and fake command line programs; chat head, popup and side panel modes |
+| Light / Dark / Auto theme | palette, canvas, start page and icon colours checked in tests |
 | Windows and macOS builds | GitHub Actions |
 
 ## Not implemented

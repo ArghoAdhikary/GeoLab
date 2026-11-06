@@ -21,10 +21,14 @@ from ..model import (ANALYSIS_KINDS, BC_KINDS, BC_TYPES, KIND_BCS, REINFORCEMENT
 from ..report import build_report
 from ..solver import solve, verify
 from .canvas import Canvas
+from .chat import ChatController
+from .theme import MODES as THEME_MODES
+from .theme import apply_theme, is_dark, manager as theme_manager
 from .dialogs import (AIDialog, BCDialog, DefineProjectDialog, EntryExitDialog, GraphDialog, MaterialsDialog, PointsDialog,
                       ProjectDialog, ReinforcementDialog, SliceTable, TextDialog)
 from .home import HomePage
-from .icons import tool_icon
+from .icons import set_dark_icons
+from .icons import tool_icon as _tool_icon
 
 DRAW_ORDER = ("region", "assign", None, "piezo", "bc", None, "point_load", "surcharge", "reinforcement", None,
               "entry_exit", "grid", None, "flux_section")
@@ -61,9 +65,13 @@ class SolveWorker(QThread):
         self.finished_solve.emit("\n".join(errors))
 
 
+_EXTRA_WINDOWS: list = []        # windows opened by the AI assistant (kept alive)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self._icon_actions = []    # (action, tool icon name), redrawn when the theme changes
         self.settings = QSettings("StrataLab", "StrataLab")
         self.project: Project = new_project()
         self.path: Path | None = None
@@ -101,6 +109,11 @@ class MainWindow(QMainWindow):
         self._build_status()
         self.canvas.status.connect(self.mode_label.setText)
         self.canvas.coords.connect(self._cursor_moved)
+        theme_manager().changed.connect(self._theme_changed)
+        apply_theme(self.settings.value("ui/theme", "auto") or "auto")
+        self._theme_changed(is_dark())
+        self.chat = ChatController(self)
+        self.chat.set_enabled(str(self.settings.value("ai/chat_enabled", "true")).lower() in ("true", "1"))
         geom = self.settings.value("window/geometry")
         if geom is not None:
             self.restoreGeometry(geom)
@@ -144,6 +157,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.BottomDockWidgetArea, d3)
         self.solve_dock = d3
         self.default_state = None
+
+    def _set_tool_icon(self, act, name):
+        self._icon_actions.append((act, name))
+        act.setIcon(_tool_icon(name))
 
     def act(self, text, slot=None, shortcut=None, icon=None, checkable=False, tip=None):
         a = QAction(text, self)
@@ -191,7 +208,7 @@ class MainWindow(QMainWindow):
         self.a_solve_mgr = A("Solve &Manager", self.show_solve_manager, "Ctrl+F5")
         self.a_goto = A("&Go to Coordinate", self.goto_coordinate, "Ctrl+G")
         for act, name in ((self.a_define, "define"), (self.a_results, "results"), (self.a_layout, "layout")):
-            act.setIcon(tool_icon(name))
+            self._set_tool_icon(act, name)
         g = QActionGroup(self)
         g.addAction(self.a_define)
         g.addAction(self.a_results)
@@ -235,13 +252,13 @@ class MainWindow(QMainWindow):
             self.draw_actions[mode] = a
         self.draw_actions["select"].setChecked(True)
         for mode, act in self.draw_actions.items():
-            act.setIcon(tool_icon(mode))
-        self.a_mats.setIcon(tool_icon("materials"))
+            self._set_tool_icon(act, mode)
+        self._set_tool_icon(self.a_mats, "materials")
         for act, name in ((self.a_zin, "zoom_in"), (self.a_zout, "zoom_out"), (self.a_print, "print"),
                           (self.a_copy, "copy"), (self.opt_actions["grid"], "grid_toggle"),
                           (self.opt_actions["snap"], "snap")):
-            act.setIcon(tool_icon(name))
-        self.a_analysis.setIcon(tool_icon("analyses"))
+            self._set_tool_icon(act, name)
+        self._set_tool_icon(self.a_analysis, "analyses")
         self.a_ee_dialog = A("Slip Surface Entry and Exit &Range...", self.entry_exit_dialog)
         self.a_verify = A("&Verify", self.verify_current, "F6", S.SP_DialogApplyButton)
         self.a_solve = A("&Solve Analysis", self.solve_current, "F5", S.SP_MediaPlay)
@@ -249,6 +266,16 @@ class MainWindow(QMainWindow):
         self.a_stop = A("S&top", self.stop_solve, None, S.SP_MediaStop)
         self.a_stop.setEnabled(False)
         self.a_ai = A("AI &Slope Builder...", self.ai_builder, "Ctrl+Shift+I")
+        self.a_chat = A("AI Assistant &Chat", lambda: self.chat.toggle() if self.chat.enabled
+                        else self.preferences("ai"), "Ctrl+Shift+J")
+        self.a_prefs = A("&Preferences...", lambda: self.preferences(), "Ctrl+,")
+        self.theme_group = QActionGroup(self)
+        self.a_theme = {}
+        for key, label in THEME_MODES.items():
+            ta = A(label, lambda _=False, k=key: self.set_theme(k), checkable=True)
+            self.theme_group.addAction(ta)
+            self.a_theme[key] = ta
+        self.a_theme.get(self.settings.value("ui/theme", "auto") or "auto", self.a_theme["auto"]).setChecked(True)
         self.a_reset = A("&Reset Window Layout", self.reset_layout)
         self.a_start = A("&Start Page", self.show_start)
         self.a_guide = A("&Quick Guide", self.quick_guide, "F1")
@@ -282,7 +309,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_exit)
 
         m = mb.addMenu("&Edit")
-        for a in (self.a_undo, self.a_redo, None, self.a_copy, None, self.a_goto):
+        for a in (self.a_undo, self.a_redo, None, self.a_copy, None, self.a_goto, None, self.a_prefs):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("&View")
@@ -294,6 +321,10 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_report)
         m.addAction(self.a_slices)
         m.addAction(self.a_graph)
+        m.addSeparator()
+        tm = m.addMenu("&Theme")
+        for a in self.a_theme.values():
+            tm.addAction(a)
 
         m = mb.addMenu("&Define")
         for a in (self.a_proj, self.a_analysis, self.a_mats, None):
@@ -335,8 +366,11 @@ class MainWindow(QMainWindow):
         self.window_menu.addAction(self.a_reset)
         self.window_menu.addAction(self.a_start)
 
+        self.window_menu.addAction(self.a_chat)
+
         m = mb.addMenu("&Help")
         m.addAction(self.a_guide)
+        m.addAction(self.a_chat)
         m.addAction(self.a_ai)
         m.addSeparator()
         m.addAction(self.a_about)
@@ -1555,8 +1589,9 @@ class MainWindow(QMainWindow):
         """Home page inside the window: New, Open, recent projects, examples and getting-started links."""
         self.home.populate(self.recent_files(), list(EXAMPLES), self.project.units)
         if self.pages.currentWidget() is not self.home:
+            keep = getattr(getattr(self, "chat", None), "dock", None)
             self._hidden_on_home = [w for w in self.findChildren(QDockWidget) + self.findChildren(QToolBar)
-                                    if w.isVisible()]
+                                    if w.isVisible() and w is not keep]
             for w in self._hidden_on_home:
                 w.hide()
             self.pages.setCurrentWidget(self.home)
@@ -1595,6 +1630,42 @@ class MainWindow(QMainWindow):
             from PySide6.QtGui import QDesktopServices
             QDesktopServices.openUrl(QUrl("https://github.com/ArghoAdhikary/StrataLab" +
                                           ("/issues" if action == "issues" else "#readme")))
+
+    # -- appearance and AI assistant ------------------------------------------
+    def _theme_changed(self, dark):
+        set_dark_icons(dark)
+        for act, name in self._icon_actions:
+            act.setIcon(_tool_icon(name))
+        self.home.set_dark(dark)
+        self.canvas.update()
+
+    def set_theme(self, mode):
+        self.settings.setValue("ui/theme", mode)
+        apply_theme(mode)
+        if mode in self.a_theme:
+            self.a_theme[mode].setChecked(True)
+
+    def preferences(self, tab="appearance"):
+        from .prefs import PreferencesDialog
+        d = PreferencesDialog(self.settings, self, tab)
+        if d.exec() != QDialog.Accepted:
+            return
+        d.save()
+        self.set_theme(d.theme())
+        for win in [self] + _EXTRA_WINDOWS:
+            win.chat.refresh_settings()
+            win.chat.set_enabled(d.enabled.isChecked())
+
+    def open_in_new_window(self, project):
+        win = MainWindow()
+        _EXTRA_WINDOWS.append(win)
+        win.destroyed.connect(lambda *_: _EXTRA_WINDOWS.remove(win) if win in _EXTRA_WINDOWS else None)
+        win.setAttribute(Qt.WA_DeleteOnClose)
+        win.set_project(project, None, dirty=True)
+        g = self.geometry()
+        win.setGeometry(g.x() + 40 * len(_EXTRA_WINDOWS), g.y() + 40 * len(_EXTRA_WINDOWS), g.width(), g.height())
+        win.show()
+        return win
 
     def quick_guide(self):
         TextDialog("Quick Guide", GUIDE, self).exec()
@@ -1677,9 +1748,19 @@ GUIDE = """StrataLab quick guide
      clicking a point in a transient result, that point against time.
    - View > Report, Slice Information. File > Export > PDF, PNG, CSV.
 
-6. AI Slope Builder
-   - AI > AI Slope Builder: describe the slope in words; Claude builds the model. Review every value
-     before relying on the result.
+6. AI help
+   - AI Assistant chat: the round button in the bottom-right corner opens a small chat box; its
+     expand button turns it into a side panel, its minus button shrinks it back to the button.
+     Ask it to build slopes ("make two 8 m clay slopes, one with water"), change the open model
+     ("raise the water table 1 m", "set clay c' to 15") or solve and explain the result.
+     Edit > Preferences > AI Assistant turns it on or off and chooses the AI: Claude or ChatGPT with
+     an API key, any OpenAI-compatible service (Gemini, OpenRouter, Ollama...), or your Claude /
+     ChatGPT account through the Claude Code or Codex app.
+   - Help > AI Slope Builder: describe one slope in words and Claude builds the model.
+   Review every value before relying on the result.
+
+7. Day and night
+   - View > Theme (or Edit > Preferences): Light, Dark or Auto (follows the operating system).
 
 Mouse: wheel zooms, middle button pans, right-click finishes a line. Keys: Esc select, F fit, Del delete region.
 """

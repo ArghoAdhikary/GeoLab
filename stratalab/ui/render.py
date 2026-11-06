@@ -142,10 +142,12 @@ class Renderer:
         self.mode = mode
         self.o = {"grid": False, "axes": True, "slices": True, "trials": True, "mesh": False,
                   "vectors": True, "labels": True, "contour": "head", "selected_region": None,
-                  "screen": True}
+                  "screen": True, "dark": False}
         if opts:
             self.o.update(opts)
         self.fs = 1.0 if self.o["screen"] else 0.6   # font scale for print
+        from .theme import CANVAS
+        self.c = CANVAS[bool(self.o["dark"] and self.o["screen"])]  # night colours on screen only
 
     # -- helpers ---------------------------------------------------------
     def pen(self, color, w=1.0, style=Qt.SolidLine):
@@ -167,7 +169,7 @@ class Renderer:
     def draw(self):
         g = self.g
         g.setRenderHint(QPainter.Antialiasing, True)
-        g.fillRect(self.v.rect, QColor("white"))
+        g.fillRect(self.v.rect, QColor(self.c["background"]))
         if self.o["grid"]:
             self.draw_grid()
         res = self.a.results if self.a else None
@@ -199,7 +201,7 @@ class Renderer:
         step = self.o.get("grid_spacing", 1.0)
         while step * v.s < 8:
             step *= 2
-        g.setPen(self.pen("#c9cfd8", 1.5))
+        g.setPen(self.pen(self.c["grid"], 1.5))
         xs = np.arange(math.floor(x0 / step) * step, x1 + step, step)
         ys = np.arange(math.floor(y0 / step) * step, y1 + step, step)
         for x in xs:
@@ -217,10 +219,10 @@ class Renderer:
                 col.setAlpha(0)
             g.setBrush(QBrush(col))
             sel = self.o["selected_region"] == r.id
-            g.setPen(self.pen("#d01f1f" if sel else "#202020", 2.2 if sel else 1.2))
+            g.setPen(self.pen("#d01f1f" if sel else self.c["outline"], 2.2 if sel else 1.2))
             g.drawPolygon(self.poly(r.points))
             if self.mode == "define" and self.o["screen"]:
-                g.setBrush(QColor("#202020"))
+                g.setBrush(QColor(self.c["outline"]))
                 for x, y in r.points:
                     d = self.v.dev(x, y)
                     g.drawRect(QRectF(d.x() - 2.5, d.y() - 2.5, 5, 5))
@@ -237,7 +239,7 @@ class Renderer:
             return
         g, v = self.g, self.v
         x0, y0, x1, y1 = project_bounds(self.p)
-        g.setPen(self.pen("#404040", 1))
+        g.setPen(self.pen(self.c["axis"], 1))
         g.setFont(self.font(8))
         step = nice_step(x1 - x0)
         off = 18 / v.s if self.o["screen"] else 14 / v.s
@@ -443,11 +445,11 @@ class Renderer:
                 if c.y() < anchor.y() - 40:
                     anchor = QPointF(c.x(), c.y())
         g.setFont(self.font(18, True))
-        g.setPen(QColor("#111111"))
+        g.setPen(QColor(self.c["axis"] if self.c["background"] != "#ffffff" else "#111111"))
         g.drawText(QRectF(anchor.x() - 80, anchor.y() - 40, 160, 32), Qt.AlignCenter, f"{crit['fos']:.3f}")
 
     def draw_message(self, text):
-        self.g.setPen(QColor("#a00000"))
+        self.g.setPen(QColor("#ff7070" if self.c["background"] != "#ffffff" else "#a00000"))
         self.g.setFont(self.font(11, True))
         r = self.v.rect
         self.g.drawText(QRectF(r.left(), r.top() + 10, r.width(), 30), Qt.AlignCenter, text)
@@ -583,7 +585,7 @@ class Renderer:
         for i in range(int(h)):
             g.setPen(colormap(1 - i / h))
             g.drawLine(QPointF(x, y + i), QPointF(x + w, y + i))
-        g.setPen(self.pen("#202020", 1))
+        g.setPen(self.pen(self.c["axis"], 1))
         g.setBrush(Qt.NoBrush)
         g.drawRect(QRectF(x, y, w, h))
         g.setFont(self.font(8))
@@ -594,7 +596,7 @@ class Renderer:
 
     def draw_sketch(self):
         g = self.g
-        g.setPen(QColor("#101010"))
+        g.setPen(QColor(self.c["axis"]))
         for t in self.p.sketch_texts:
             g.setFont(self.font(t.size))
             g.drawText(self.v.dev(t.x, t.y), t.text)

@@ -95,8 +95,16 @@ def kind_icon(kind: str) -> QIcon:
 # ---------------------------------------------------------------------------
 # tool icons (drawing and view tools)
 # ---------------------------------------------------------------------------
+_INK = {"color": "#2b2b2b"}
+
+
+def set_dark_icons(dark: bool):
+    """Tool icons are drawn with dark lines by day and light lines at night."""
+    _INK["color"] = "#dadde2" if dark else "#2b2b2b"
+
+
 def _tool(p: QPainter, name: str, s: float):
-    ink = QColor("#2b2b2b")
+    ink = QColor(_INK["color"])
     pen = QPen(ink, max(1.0, s / 16))
     pen.setJoinStyle(Qt.RoundJoin)
     pen.setCapStyle(Qt.RoundCap)
@@ -264,7 +272,7 @@ def _tool(p: QPainter, name: str, s: float):
 def tool_icon(name: str) -> QIcon:
     icon = QIcon()
     for size in (16, 24, 32):
-        key = ("tool", name, size)
+        key = ("tool", name, size, _INK["color"])
         if key not in _cache:
             pm = QPixmap(size, size)
             pm.fill(Qt.transparent)

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QWidget
 
 from ..geometry import point_in_polygon
 from ..model import PointLoad, Surcharge
+from .theme import is_dark
 from .render import Renderer, View, project_bounds
 
 MODE_HINTS = {
@@ -75,6 +76,7 @@ class Canvas(QWidget):
         opts = dict(h.opts)
         opts["selected_region"] = self.selected_region
         opts["grid_spacing"] = h.project.grid_spacing
+        opts["dark"] = is_dark()
         Renderer(h.project, h.current_analysis(), self.view, g, mode=h.view_mode, opts=opts).draw()
         if self.temp:
             pen = QPen(QColor("#d01f1f"), 1.6)
