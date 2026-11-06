@@ -31,7 +31,7 @@ function call(fn, ...args) {
 async function boot() {
   let base = CDN;
   try {
-    const r = await fetch("pyodide/pyodide.js", { method: "HEAD" });
+    const r = await fetch("pyodide/pyodide.js", { cache: "no-store" });
     if (r.ok) base = new URL("pyodide/", location.href).href;
   } catch { /* use the CDN */ }
   return new Promise((resolve, reject) => {
