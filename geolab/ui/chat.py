@@ -248,7 +248,7 @@ class ChatPanel(QWidget):
                "assistant": (A.color("chat_ai", "bg", ai[0]), A.color("chat_ai", "fg", ai[1])),
                "note": ("#203a2a", "#a8e0b8") if dark else ("#e9f7ee", "#1d5b32"),
                "error": ("#4a2323", "#ffb4b4") if dark else ("#fdecec", "#8a1c1c")}
-        family, size = "Segoe UI, sans-serif", "10pt"
+        family, size = "'Segoe UI', 'Helvetica Neue', sans-serif", "10pt"
         f = A.config().fonts.get("chat_box")
         if f:
             qf = QFont()

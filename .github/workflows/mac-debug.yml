@@ -14,7 +14,15 @@ jobs:
         os: [macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Install with the one-line installer
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/install-mac.sh" -o install-mac.sh
+          GEOLAB_TAG="${{ inputs.tag }}" GEOLAB_NO_OPEN=1 bash install-mac.sh
+          ls -d /Applications/GeoLab.app ~/Applications/GeoLab.app 2>/dev/null
+          file /Applications/GeoLab.app/Contents/MacOS/GeoLab || file ~/Applications/GeoLab.app/Contents/MacOS/GeoLab
+          open -a GeoLab && sleep 20 && pgrep -fl GeoLab
       - name: Download and launch the released app
+        if: false
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

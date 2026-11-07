@@ -106,6 +106,20 @@ CANVAS = {
 _manager: ThemeManager | None = None
 
 
+UI_FAMILIES = ["Segoe UI", "Helvetica Neue", "Arial", "Nirmala UI", "Noto Sans Bengali"]
+
+
+def ui_font(size=None, bold=False, pixel=False):
+    """The drawing / print font: Segoe UI on Windows, Helvetica Neue on macOS (no missing-font delay)."""
+    from PySide6.QtGui import QFont
+    f = QFont()
+    f.setFamilies(UI_FAMILIES)
+    if size is not None:
+        (f.setPixelSize if pixel else f.setPointSizeF)(size)
+    f.setBold(bold)
+    return f
+
+
 def manager() -> ThemeManager:
     global _manager
     if _manager is None:

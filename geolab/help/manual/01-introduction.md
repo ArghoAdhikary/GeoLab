@@ -24,7 +24,7 @@ Every release on GitHub (https://github.com/ArghoAdhikary/GeoLab/releases) has:
 |---|---|
 | GeoLab-Setup.exe | Windows installer. Start menu entry, desktop icon, opens .slab files, uninstaller. |
 | GeoLab-windows-portable.zip | Windows without installing: unzip anywhere (also a USB stick) and run GeoLab.exe. Settings are kept in GeoLab.ini next to the program. |
-| GeoLab-macos.zip | macOS app. The app is not notarized: right-click it and choose Open the first time. |
+| GeoLab-macos-apple-silicon.zip / GeoLab-macos-intel.zip | macOS app for M-series or Intel Macs. Easiest: in Terminal run `curl -fsSL https://raw.githubusercontent.com/ArghoAdhikary/GeoLab/main/install-mac.sh \| bash`, which installs the right one and lets macOS open it. If you unzip it yourself, open System Settings > Privacy & Security and press Open Anyway the first time. |
 | GeoLab-android.apk | Android phone or tablet. Allow installing apps from this source when Android asks. |
 | GeoLab-ios-unsigned.ipa | iPhone / iPad, unsigned. It must be signed with your own Apple account (for example with AltStore or Xcode) before it can be installed. |
 | GeoLab-User-Manual.pdf | This manual. |

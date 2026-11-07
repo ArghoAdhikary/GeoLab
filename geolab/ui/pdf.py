@@ -24,7 +24,8 @@ def paint_pages(device, project, analysis, mode, opts, new_page, painter=None, f
         draw = QRectF(page.left(), page.top() + head_h, page.width(), page.height() - head_h - 24 * pt)
         g.setPen(QPen(QColor("#1d4e89"), 2 * pt))
         g.drawLine(page.left(), page.top() + head_h - 6 * pt, page.right(), page.top() + head_h - 6 * pt)
-        f = QFont("Segoe UI")
+        from .theme import ui_font
+        f = ui_font()
         f.setPixelSize(int(16 * pt)); f.setBold(True)
         g.setFont(f)
         g.setPen(QColor("#111"))

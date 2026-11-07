@@ -66,11 +66,22 @@ From the [Releases](https://github.com/ArghoAdhikary/GeoLab/releases) page:
 |---|---|
 | `GeoLab-Setup.exe` | Windows installer: Start menu and desktop shortcuts, opens `.slab` files, uninstall from Settings > Apps |
 | `GeoLab-windows-portable.zip` | Windows, nothing installed: unzip anywhere (also a USB stick) and run `GeoLab.exe`. Settings stay in `GeoLab.ini` beside it |
-| `GeoLab-macos.zip` | macOS: unzip and open `GeoLab.app` |
+| `GeoLab-macos-apple-silicon.zip` | macOS on M1/M2/M3/M4 Macs. Easiest: the one-line installer below |
+| `GeoLab-macos-intel.zip` | macOS on Intel Macs |
 | `GeoLab-android.apk` | Android phones and tablets (GeoLab Mobile) |
 | `GeoLab-ios-unsigned.ipa` | iPhone and iPad (GeoLab Mobile), unsigned: see below |
 | `GeoLab-User-Manual.pdf` | The user manual and ten tutorials (also inside the Windows app: Help > User Manual) |
 | `GeoLab-examples.zip` | Every example project, solved, as `.slab` files |
+
+**Mac: install with one command.** Open Terminal and paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ArghoAdhikary/GeoLab/main/install-mac.sh | bash
+```
+
+It picks the Apple Silicon or Intel build, puts GeoLab in Applications and lets macOS open it (GeoLab is
+not signed with a paid Apple certificate, so a downloaded zip is blocked by Gatekeeper). Run it again to
+update.
 
 The desktop builds are not code-signed: on Windows choose *More info > Run anyway*; on macOS right-click
 the app and choose *Open* the first time.

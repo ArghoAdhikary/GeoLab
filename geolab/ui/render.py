@@ -161,7 +161,8 @@ class Renderer:
         return p
 
     def font(self, size, bold=False):
-        f = QFont("Segoe UI")
+        from .theme import ui_font
+        f = ui_font()
         if self.o["screen"]:
             from .appearance import font as user_font
             uf = user_font("canvas")

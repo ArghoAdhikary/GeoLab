@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDia
                                QScrollArea, QSpinBox, QStackedWidget, QStyle, QTableWidget, QTableWidgetItem, QTabWidget,
                                QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QVBoxLayout, QWidget)
 
+from .theme import ui_font
 from ..geometry import auto_entry_exit
 from ..model import (ANALYSIS_KINDS, BC_KIND_OF, BC_KINDS, BC_TYPES, HYDRAULIC_MODELS, INTERSLICE_FUNCTIONS,
                      MATERIAL_COLORS, PWP_MODES, REINFORCEMENT_TYPES, SEARCH_MODES, SLOPE_METHODS, STRENGTH_MODELS,
@@ -1515,7 +1516,7 @@ class GraphWidget(QWidget):
         Y = lambda y: B - (y - y0) / (y1 - y0) * (B - T)
         g.setPen(QPen(QColor("#333"), 1))
         g.drawRect(QRectF(L, T, R - L, B - T))
-        g.setFont(QFont("Segoe UI", 8))
+        g.setFont(ui_font(8))
         for k in range(6):
             yv = y0 + k * (y1 - y0) / 5
             g.drawText(QRectF(0, Y(yv) - 8, L - 6, 16), Qt.AlignRight | Qt.AlignVCenter, f"{yv:.3g}")

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.11.1 - 2026-11-08
+
+- **Mac fixed:** the Mac app was built only for Apple Silicon and was blocked by Gatekeeper. There are now
+  two builds, `GeoLab-macos-apple-silicon.zip` and `GeoLab-macos-intel.zip`. Both are signed for local use
+  and opened, solved and checked on a Mac during every build.
+- New one-line Mac installer: `curl -fsSL https://raw.githubusercontent.com/ArghoAdhikary/GeoLab/main/install-mac.sh | bash`.
+- Drawings, PDF and chat use Helvetica Neue on macOS instead of the missing Segoe UI.
+
 ## 2.11.0 - 2026-11-08
 
 ### Looks
