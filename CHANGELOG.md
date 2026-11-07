@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.12.0 - 2026-11-08
+
+### From the site
+
+- **Cross-section from a map:** click two points on an OpenStreetMap map. GeoLab gets the ground levels
+  (Copernicus 90 m DEM through Open-Meteo) and builds the slope model with your soil layers and water table.
+- **Landslide early warning:** past rain and the 7-16 day forecast give F and a green / yellow / orange /
+  red alert for each day. It can use your transient seepage model or a quick water table rise, and it can
+  check every 6 hours while GeoLab is open.
+- **Strength from lab tests:** triaxial (CD, CU with u, UU) and direct shear give c', phi' and R^2, with
+  Mohr circles.
+- **SWCC and k from the grain size:** Modified Kovacs and Chapuis for sands, and Carsel & Parrish for
+  silts and clays.
+- **AutoCAD DXF** import (closed polylines or lines to regions, layers to materials) and export (R12,
+  with the slip surface).
+
+### Design
+
+- **Probabilistic analysis** on the lowest slip surfaces: Pf, reliability index, histogram and a tornado
+  sensitivity chart.
+- **Foundations and retaining walls:** bearing capacity (Vesic, Hansen, Meyerhof) with the code check,
+  settlement, cantilever / gravity walls, cantilever sheet piles.
+- **Quantities and cost** (materials, cut and fill, reinforcement) and **Compare Design Options** (F,
+  pass or fail, Pf and cost side by side).
+
+### Working faster
+
+- Command palette (Ctrl+K), project tabs (Ctrl+T), a History panel of every change, Version History
+  (the file, .bak, autosave and cloud backups, compared and restored).
+- Your own keyboard shortcuts and "My Tools" toolbar.
+- Pictures of recent projects on the start page.
+- Crash recovery and an update check.
+- Share Report: one HTML file in the cloud drive folder, ready to share with a link.
+
+### Mobile
+
+- Colour schemes and Bangla in the mobile app.
+
 ## 2.11.1 - 2026-11-08
 
 - **Mac fixed:** the Mac app was built only for Apple Silicon and was blocked by Gatekeeper. There are now

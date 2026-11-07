@@ -115,6 +115,19 @@ BN = {
     "Your fonts": "আপনার ফন্ট", "Language": "ভাষা",
     "Save my work automatically (on by default)": "আমার কাজ নিজে থেকে সংরক্ষণ করুন (শুরু থেকেই চালু)",
     "Back up a dated copy of the project to a cloud drive": "প্রজেক্টের তারিখসহ কপি ক্লাউড ড্রাইভে রাখুন",
+    # 2.12
+    "Cross-Section from Map": "ম্যাপ থেকে সেকশন", "Landslide Early Warning": "ভূমিধস আগাম সতর্কতা",
+    "Probabilistic Analysis and Sensitivity": "সম্ভাব্যতা বিশ্লেষণ ও সংবেদনশীলতা",
+    "Foundations and Retaining Walls": "ফাউন্ডেশন ও রিটেইনিং ওয়াল", "Strength from Lab Tests": "ল্যাব টেস্ট থেকে শক্তি",
+    "Estimate SWCC and k from Grain Size": "দানার আকার থেকে SWCC ও k", "Quantities and Cost": "পরিমাণ ও খরচ",
+    "Compare Design Options": "ডিজাইন বিকল্পের তুলনা", "Import AutoCAD DXF": "AutoCAD DXF ইমপোর্ট",
+    "Export AutoCAD DXF": "AutoCAD DXF এক্সপোর্ট", "Command Palette": "কমান্ড প্যালেট",
+    "Keyboard Shortcuts and My Toolbar": "কি-বোর্ড শর্টকাট ও আমার টুলবার", "Version History": "ভার্সন ইতিহাস",
+    "New Tab": "নতুন ট্যাব", "Open in New Tab": "নতুন ট্যাবে খুলুন", "Close Tab": "ট্যাব বন্ধ",
+    "Check for Updates": "আপডেট খুঁজুন", "Share Report (HTML to Cloud Drive)": "রিপোর্ট শেয়ার (ক্লাউড ড্রাইভে HTML)",
+    "History": "ইতিহাস", "Get Ground Levels": "মাটির উচ্চতা আনুন", "Make the Model": "মডেল তৈরি করুন",
+    "Check Now": "এখনই দেখুন", "Calculate": "হিসাব করুন", "Fit": "ফিট", "Estimate": "অনুমান",
+    "Use for Material": "উপাদানে বসান", "Compare": "তুলনা", "Put in the Design Report": "ডিজাইন রিপোর্টে রাখুন",
 }
 
 _lang = "en"

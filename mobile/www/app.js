@@ -111,6 +111,59 @@ function applyTheme(mode) {
 }
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => requestAnimationFrame(draw));
 document.querySelectorAll("#theme-seg button").forEach((b) => (b.onclick = () => applyTheme(b.dataset.theme)));
+// ---------------------------------------------------------------- colours and language
+function applyScheme(name) {
+  store.set("scheme", name);
+  if (name === "geolab") delete document.documentElement.dataset.scheme;
+  else document.documentElement.dataset.scheme = name;
+  document.querySelectorAll("#scheme-seg button").forEach((b) => b.classList.toggle("on", b.dataset.scheme === name));
+  const head = getComputedStyle(document.documentElement).getPropertyValue("--head").trim();
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta && head) meta.content = head;
+}
+document.querySelectorAll("#scheme-seg button").forEach((b) => (b.onclick = () => applyScheme(b.dataset.scheme)));
+
+const BN = {
+  "Analysis": "বিশ্লেষণ", "Materials": "উপাদান", "Results": "ফলাফল", "Theme": "থিম", "Auto": "অটো",
+  "Day": "দিন", "Night": "রাত", "Colours": "রং", "Language": "ভাষা", "About GeoLab": "GeoLab সম্পর্কে",
+  "Open file (.slab, .gsz)": "ফাইল খুলুন (.slab, .gsz)", "Save / share project": "সংরক্ষণ / শেয়ার",
+  "Show report": "রিপোর্ট দেখুন", "Rename project": "নাম বদলান", "Quick slope": "কুইক স্লোপ",
+  "Height (m)": "উচ্চতা (মি)", "Slope (H : 1V)": "ঢাল (H : 1V)", "Crest width (m)": "চূড়ার প্রস্থ (মি)",
+  "Toe width (m)": "পাদদেশের প্রস্থ (মি)", "Depth below toe (m)": "পাদদেশের নিচে গভীরতা (মি)",
+  "Crest load (kPa)": "চূড়ায় লোড (kPa)", "Soil layers": "মাটির স্তর", "+ Add layer": "+ স্তর যোগ করুন",
+  "Build and solve": "তৈরি ও সমাধান", "Examples": "উদাহরণ", "Open a project file": "প্রজেক্ট ফাইল খুলুন",
+  "Back to last project": "শেষ প্রজেক্টে ফিরুন", "Slope stability and seepage on your phone":
+  "ফোনেই ঢালের স্থিতিশীলতা ও চুয়ানো", "Solving...": "সমাধান হচ্ছে...", "Starting...": "চালু হচ্ছে...",
+  "Fit": "পুরোটা", "Water table": "পানির স্তর", "m below the crest": "মি চূড়ার নিচে",
+  "Solve": "সমাধান", "Solve all": "সব সমাধান", "Factor of safety": "নিরাপত্তা গুণক", "Opening...": "খুলছে...",
+  "Building...": "তৈরি হচ্ছে...", "Solve the analysis first.": "আগে বিশ্লেষণটি সমাধান করুন।",
+  "Report": "রিপোর্ট", "Name": "নাম", "Method": "পদ্ধতি", "Cohesion": "সংসক্তি", "Friction angle": "ঘর্ষণ কোণ",
+  "Unit weight": "একক ওজন", "Close": "বন্ধ",
+};
+let LANG = "en";
+function trText(node) {
+  const t = node.nodeValue, k = t.trim();
+  if (!k) return;
+  if (LANG === "bn" && BN[k]) { node._en = node._en || t; node.nodeValue = t.replace(k, BN[k]); }
+  else if (LANG === "en" && node._en) { node.nodeValue = node._en; }
+}
+function translate(root) {
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) trText(n);
+}
+const observer = new MutationObserver((ms) => { if (LANG !== "en") ms.forEach((m) => m.addedNodes.forEach((n) =>
+  n.nodeType === 3 ? trText(n) : n.nodeType === 1 && translate(n))); });
+function applyLang(lang) {
+  LANG = lang === "bn" ? "bn" : "en";
+  store.set("lang", LANG);
+  document.documentElement.lang = LANG;
+  document.querySelectorAll("#lang-seg button").forEach((b) => b.classList.toggle("on", b.dataset.lang === LANG));
+  translate(document.body);
+  if (LANG === "bn") observer.observe(document.body, { childList: true, subtree: true });
+  else observer.disconnect();
+}
+document.querySelectorAll("#lang-seg button").forEach((b) => (b.onclick = () => applyLang(b.dataset.lang)));
+
 const isDark = () => getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim().toLowerCase() !== "#ffffff";
 
 // ---------------------------------------------------------------- start page
@@ -563,6 +616,8 @@ new ResizeObserver(() => resize()).observe($("#view"));
 // ---------------------------------------------------------------- start up
 (async function start() {
   applyTheme(store.get("theme", "auto"));
+  applyScheme(store.get("scheme", "geolab"));
+  applyLang(store.get("lang", "en"));
   try {
     const q = JSON.parse(store.get("quick", "null"));
     if (q) {

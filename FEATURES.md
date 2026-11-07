@@ -106,6 +106,20 @@ directly with another vendor's software.
 | Example files: every example solved and saved as .slab (Help > Example Files Folder, GeoLab-examples.zip) | files written and read back (`test_help.py`) |
 | Intel MKL PARDISO sparse direct solver on Windows for systems above 30 000 unknowns; SciPy SuperLU below that, on macOS and on phones | same solution to round-off (residual ~1e-15); full test suite passes with MKL loaded; factorisation 5-8 times faster at 50 000-200 000 unknowns |
 
+### Added in 2.12 (field to design)
+
+| Feature | Verified by |
+|---|---|
+| Cross-section from a map (Open-Meteo / Copernicus DEM) to a layered slope model | haversine distance; model built and solved from a test profile (`test_v212.py`) |
+| Landslide early warning (forecast, quick and model methods, alert levels, 6-hour watch) | F falls with the rain on the rainfall example; thresholds; dialog with a fake forecast |
+| Probabilistic analysis on a surface pool, reliability index, tornado | Pf and mean F of the benchmark; phi' is the most sensitive parameter |
+| AutoCAD DXF import / export | round trip of a layered model; LINE loops in millimetres |
+| Bearing capacity, settlement, retaining wall, cantilever sheet pile | Vesic factors for phi' = 30 deg (30.14, 18.40, 22.40); Ka, Kp; water lowers the capacity |
+| Mohr-Coulomb fit of triaxial and direct shear tests | exact c' = 10, phi' = 30 recovered |
+| SWCC and k estimates | sand and clay values in the expected ranges |
+| Quantities, cut and fill, cost, option comparison | cut 7.5 / fill 2.5 m2 of a test section |
+| Command palette, tabs, history, version history, shortcuts, my toolbar, thumbnails, crash recovery, update check, share report | driven through the widgets (`test_v212.py`) |
+
 ### Added in 2.11 (looks and files)
 
 | Feature | Verified by |

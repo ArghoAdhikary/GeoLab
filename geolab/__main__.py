@@ -121,6 +121,19 @@ def run_gui(argv) -> int:
         w.open_file(argv[0])
     else:
         w.show_start()
+    from PySide6.QtCore import QTimer
+    from .ui import extras
+    prev = extras.begin_session()
+    app.aboutToQuit.connect(extras.end_session)
+    if prev is not None:
+        def offer():
+            from PySide6.QtWidgets import QMessageBox
+            r = QMessageBox.question(w, APP_NAME, "GeoLab did not close normally last time. Open the autosaved "
+                                     "copies to recover your work?")
+            if r == QMessageBox.Yes:
+                w.recover_autosave()
+        QTimer.singleShot(800, offer)
+    QTimer.singleShot(5000, lambda: w.check_updates(quiet=True))
     return app.exec()
 
 

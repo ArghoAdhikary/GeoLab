@@ -68,6 +68,7 @@ class SolveWorker(QThread):
 
 _EXTRA_WINDOWS: list = []        # windows opened by the AI assistant (kept alive)
 _TITLEBAR_FILTER = []
+_CRASH_HANDLER = []
 
 
 def _install_titlebar_filter():
@@ -112,6 +113,13 @@ class MainWindow(QMainWindow):
         self.dirty = False
         self.undo_stack: list[dict] = []
         self.redo_stack: list[dict] = []
+        self.undo_desc: list[str] = []
+        self.redo_desc: list[str] = []
+        self.docs: list = [None]          # project tabs: saved state of each tab (the open one is live)
+        self._cur_tab = 0
+        self._tab_busy = False
+        self.last_warning = None
+        self._watch = None
         self.current_aid = self.project.analyses[0].id
         self.view_mode = "define"
         self.opts = {"grid": True, "snap": True, "mesh": False, "slices": True, "trials": True,
@@ -140,6 +148,17 @@ class MainWindow(QMainWindow):
         dl = QVBoxLayout(self.drawing)
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(0)
+        from PySide6.QtWidgets import QTabBar
+        self.tabbar = QTabBar()
+        self.tabbar.setTabsClosable(True)
+        self.tabbar.setMovable(False)
+        self.tabbar.setDocumentMode(True)
+        self.tabbar.setExpanding(False)
+        self.tabbar.addTab("Untitled")
+        self.tabbar.currentChanged.connect(self.tab_changed)
+        self.tabbar.tabCloseRequested.connect(self.close_tab)
+        self.tabbar.hide()
+        dl.addWidget(self.tabbar)
         dl.addWidget(self.stepbar)
         dl.addWidget(self.canvas, 1)
         self.pages.addWidget(self.drawing)
@@ -165,6 +184,11 @@ class MainWindow(QMainWindow):
         geom = self.settings.value("window/geometry")
         if geom is not None:
             self.restoreGeometry(geom)
+        from . import extras
+        extras.apply_shortcuts(self, self.settings)
+        extras.build_my_toolbar(self, self.settings)
+        if not _CRASH_HANDLER:
+            _CRASH_HANDLER.append(extras.install_crash_handler(self))
         self._last_backup = 0.0
         self.autosave_timer = QTimer(self)
         self.autosave_timer.timeout.connect(self.autosave)
@@ -208,6 +232,15 @@ class MainWindow(QMainWindow):
         d3.setWidget(w)
         self.addDockWidget(Qt.BottomDockWidgetArea, d3)
         self.solve_dock = d3
+        from .extras import UndoHistory
+        self.history = UndoHistory(self)
+        d4 = QDockWidget("History", self)
+        d4.setObjectName("history")
+        d4.setWidget(self.history)
+        self.addDockWidget(Qt.RightDockWidgetArea, d4)
+        d4.hide()
+        d4.visibilityChanged.connect(lambda vis: vis and self.history.refresh())
+        self.history_dock = d4
         self.default_state = None
 
     def _set_tool_icon(self, act, name):
@@ -396,6 +429,32 @@ class MainWindow(QMainWindow):
         self.a_riverbank = A("New &River Bank...", lambda: self.new_template("riverbank"))
         self.a_levee = A("New &Flood Embankment...", lambda: self.new_template("levee"))
         self.a_bangla = A("Bangla Getting Started", lambda: self.show_help(page=self._bangla_page()))
+        # 2.12
+        self.a_map = A("Cross-Section from &Map...", lambda: self.tool2("map"), "Ctrl+Alt+M",
+                       tip="Click two points on a map; GeoLab gets the ground levels and builds the slope model")
+        self.a_warning = A("Landslide &Early Warning...", lambda: self.tool2("warning"),
+                           tip="Past rain and the forecast turned into F and an alert level for each day")
+        self.a_prob = A("&Probabilistic Analysis and Sensitivity...", lambda: self.tool2("prob"),
+                        tip="Monte Carlo on the lowest slip surfaces: probability of failure, reliability index, "
+                            "tornado chart")
+        self.a_found = A("&Foundations and Retaining Walls...", lambda: self.tool2("found"),
+                         tip="Bearing capacity, settlement, retaining wall and sheet pile checks")
+        self.a_lab = A("Strength from &Lab Tests...", lambda: self.tool2("lab"),
+                       tip="Triaxial or direct shear results to c' and phi' (Mohr circles)")
+        self.a_swcc = A("Estimate S&WCC and k from Grain Size...", lambda: self.tool2("swcc"))
+        self.a_qty = A("&Quantities and Cost...", lambda: self.tool2("qty"))
+        self.a_compare = A("Compare Design &Options...", lambda: self.tool2("compare"))
+        self.a_dxf_in = A("Import AutoCAD &DXF...", self.import_dxf)
+        self.a_dxf_out = A("Export AutoCAD D&XF...", self.export_dxf)
+        self.a_palette = A("Command &Palette...", self.command_palette, "Ctrl+K",
+                           tip="Type the name of any command")
+        self.a_shortcuts = A("Keyboard Shortcuts and My &Toolbar...", self.edit_shortcuts)
+        self.a_versions = A("&Version History...", self.version_history, "Ctrl+Shift+H")
+        self.a_new_tab = A("New &Tab", lambda: self.new_tab(new_project(self.project.units)), "Ctrl+T")
+        self.a_open_tab = A("Open in New Ta&b...", self.open_in_tab, "Ctrl+Alt+O")
+        self.a_close_tab = A("&Close Tab", lambda: self.close_tab(self.tabbar.currentIndex()), "Ctrl+W")
+        self.a_update = A("Check for &Updates...", lambda: self.check_updates(quiet=False))
+        self.a_share = A("S&hare Report (HTML to Cloud Drive)...", self.share_report)
 
     def _build_menus(self):
         mb = self.menuBar()
@@ -408,6 +467,9 @@ class MainWindow(QMainWindow):
         for a in self.a_new_kind.values():
             nm.addAction(a)
         m.addAction(self.a_open)
+        m.addAction(self.a_new_tab)
+        m.addAction(self.a_open_tab)
+        m.addAction(self.a_close_tab)
         ex = m.addMenu("Open &Example")
         for name in EXAMPLES:
             ex.addAction(name, lambda n=name: self.open_example(n))
@@ -419,11 +481,14 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_save_gsz)
         m.addAction(self.a_save_pdf)
         m.addAction(self.a_recover)
+        m.addAction(self.a_versions)
         m.addAction(self.a_backup)
+        m.addAction(self.a_share)
         m.addSeparator()
         m.addAction(self.a_import)
+        m.addAction(self.a_dxf_in)
         exp = m.addMenu("E&xport")
-        for a in (self.a_pdf, self.a_save_pdf, self.a_png, self.a_csv, self.a_json, self.a_gsz):
+        for a in (self.a_pdf, self.a_save_pdf, self.a_png, self.a_csv, self.a_json, self.a_gsz, self.a_dxf_out):
             exp.addAction(a)
         m.addAction(self.a_print)
         m.addSeparator()
@@ -489,20 +554,21 @@ class MainWindow(QMainWindow):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("Desi&gn")
-        for a in (self.a_code, self.a_optimizer, self.a_whatif, None, self.a_backcalc, self.a_liq, None,
-                  self.a_dreport):
+        for a in (self.a_code, self.a_optimizer, self.a_whatif, self.a_prob, None, self.a_backcalc, self.a_liq,
+                  None, self.a_found, None, self.a_qty, self.a_compare, None, self.a_dreport):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("&Tools")
-        for a in (self.a_boreholes, self.a_rain, self.a_monitor, self.a_calib_k, None, self.a_photo, None,
-                  self.a_console):
+        for a in (self.a_map, self.a_boreholes, self.a_rain, self.a_warning, self.a_monitor, self.a_calib_k, None,
+                  self.a_lab, self.a_swcc, None, self.a_photo, None, self.a_console, self.a_palette,
+                  self.a_shortcuts):
             m.addSeparator() if a is None else m.addAction(a)
 
         self.window_menu = mb.addMenu("&Window")
         for a in (self.a_solve_mgr, self.a_verify, self.a_solve, self.a_solve_all, self.a_stop):
             self.window_menu.addAction(a)
         self.window_menu.addSeparator()
-        for d in (self.explorer_dock, self.props_dock, self.solve_dock):
+        for d in (self.explorer_dock, self.props_dock, self.solve_dock, self.history_dock):
             self.window_menu.addAction(d.toggleViewAction())
         self.window_menu.addSeparator()
         self.window_menu.addAction(self.a_reset)
@@ -518,6 +584,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_ex_folder)
         m.addAction(self.a_bangla)
         m.addSeparator()
+        m.addAction(self.a_update)
         m.addAction(self.a_chat)
         m.addAction(self.a_ai)
         m.addSeparator()
@@ -667,11 +734,16 @@ class MainWindow(QMainWindow):
 
     def before_change(self):
         self.undo_stack.append(self.project.to_dict())
+        self.undo_desc.append("Edit")
         if len(self.undo_stack) > MAX_UNDO:
             self.undo_stack.pop(0)
+        del self.undo_desc[:max(0, len(self.undo_desc) - len(self.undo_stack))]
         self.redo_stack.clear()
+        self.redo_desc.clear()
 
     def after_change(self, desc="Edit", keep_results=False):
+        if self.undo_desc and self.undo_desc[-1] == "Edit":
+            self.undo_desc[-1] = desc
         if not keep_results:
             self.project.clear_results()
             if self.view_mode == "results":
@@ -806,6 +878,12 @@ class MainWindow(QMainWindow):
         self.a_redo.setEnabled(bool(self.redo_stack))
         name = self.path.name if self.path else "Untitled"
         self.setWindowTitle(f"{name}{' *' if self.dirty else ''} - {self.project.title} - {APP_NAME}")
+        if hasattr(self, "tabbar"):
+            label = (self.path.stem if self.path else (self.project.title or "Untitled"))[:28]
+            self.tabbar.setTabText(self.tabbar.currentIndex(), label + (" *" if self.dirty else ""))
+            self.tabbar.setTabToolTip(self.tabbar.currentIndex(), str(self.path) if self.path else self.project.title)
+        if hasattr(self, "history_dock") and self.history_dock.isVisible():
+            self.history.refresh()
         if hasattr(self, "stepbar"):
             self.stepbar.setVisible(self.a_steps.isChecked())
             if self.a_steps.isChecked():
@@ -1098,6 +1176,8 @@ class MainWindow(QMainWindow):
         self.dirty = dirty
         self.undo_stack.clear()
         self.redo_stack.clear()
+        self.undo_desc.clear()
+        self.redo_desc.clear()
         self.current_aid = project.analyses[0].id if project.analyses else None
         self.current_material_id = project.materials[0].id if project.materials else None
         self.canvas.selected_region = None
@@ -1466,6 +1546,7 @@ class MainWindow(QMainWindow):
             return
         self.redo_stack.append(self.project.to_dict())
         self.project = Project.from_dict(self.undo_stack.pop())
+        self.redo_desc.append(self.undo_desc.pop() if self.undo_desc else "Edit")
         self.dirty = True
         self._fix_current()
         self.refresh_all()
@@ -1475,6 +1556,7 @@ class MainWindow(QMainWindow):
             return
         self.undo_stack.append(self.project.to_dict())
         self.project = Project.from_dict(self.redo_stack.pop())
+        self.undo_desc.append(self.redo_desc.pop() if self.redo_desc else "Edit")
         self.dirty = True
         self._fix_current()
         self.refresh_all()
@@ -2028,6 +2110,7 @@ class MainWindow(QMainWindow):
     def show_start(self):
         """Home page inside the window: New, Open, recent projects, examples and getting-started links."""
         self.home.populate(self.recent_files(), list(EXAMPLES), self.project.units)
+        self._home_thumbnails()
         if self.pages.currentWidget() is not self.home:
             keep = getattr(getattr(self, "chat", None), "dock", None)
             self._hidden_on_home = [w for w in self.findChildren(QDockWidget) + self.findChildren(QToolBar)
@@ -2290,13 +2373,300 @@ class MainWindow(QMainWindow):
                           f"Python {sys.version.split()[0]}, Qt for Python, NumPy, SciPy.<br>"
                           f"Sparse solver: {solver_text()}<br>MIT License.")
 
+    # -- 2.12 tools ------------------------------------------------------------
+    def tool2(self, name, run=True):
+        from . import tools, tools2
+        if name == "prob":
+            if not tools._need(self, "a solved slope stability analysis", tools.slope_analyses(self.project, True)):
+                return None
+        cls = {"map": tools2.MapSectionDialog, "warning": tools2.WarningDialog, "prob": tools2.ReliabilityDialog,
+               "found": tools2.FoundationDialog, "lab": tools2.LabTestDialog, "swcc": tools2.SwccDialog,
+               "qty": tools2.QuantitiesDialog, "compare": tools2.CompareDialog}[name]
+        d = cls(self)
+        if run:
+            d.exec()
+        return d
+
+    def import_dxf(self, path=None, scale=None):
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, "Import AutoCAD DXF", self.last_dir(), "AutoCAD DXF (*.dxf)")
+            if not path:
+                return None
+        if scale is None:
+            scale, ok = QInputDialog.getDouble(self, "Import DXF", "Drawing units to metres (1 = metres, 0.001 = mm):",
+                                               1.0, 1e-6, 1e6, 6)
+            if not ok:
+                return None
+            if not self.maybe_save():
+                return None
+        from ..dxf import import_dxf
+        try:
+            p, notes = import_dxf(path, scale=scale)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Import DXF", str(e))
+            return None
+        p.title = Path(path).stem
+        self.set_project(p, dirty=True)
+        for n in notes:
+            self.log_msg(n)
+        return p
+
+    def export_dxf(self, path=None):
+        if not path:
+            path = self._ask_save("Export AutoCAD DXF", ".dxf", "AutoCAD DXF (*.dxf)")
+        if not path:
+            return None
+        from ..dxf import export_dxf
+        a = self.current_analysis()
+        export_dxf(self.project, path, a if (a and a.kind == "slope") else None)
+        self.log_msg(f"Exported DXF: {path}")
+        return path
+
+    def command_palette(self):
+        from .extras import CommandPalette
+        d = CommandPalette(self)
+        d.exec()
+        return d
+
+    def edit_shortcuts(self):
+        from .extras import ShortcutsDialog
+        d = ShortcutsDialog(self, self.settings)
+        d.exec()
+        return d
+
+    def version_history(self, run=True):
+        from .extras import VersionHistoryDialog
+        d = VersionHistoryDialog(self)
+        if run:
+            d.exec()
+        return d
+
+    def share_report(self):
+        from .extras import share_report
+        try:
+            out = share_report(self)
+        except Exception as e:                       # noqa: BLE001
+            QMessageBox.warning(self, "Share report", f"Could not write the report: {e}")
+            return None
+        self.log_msg(f"Report for sharing: {out}")
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QMessageBox.information(self, "Share report",
+                                    f"The report is one HTML file (pictures inside):\n{out}\n\nIf this folder is "
+                                    "Google Drive or OneDrive, open it in the browser, right-click the file and "
+                                    "choose Share to send a link. Anyone can open it in a browser or on a phone, "
+                                    "and Google Drive lets them add comments.")
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(out.parent)))
+        return out
+
+    # -- project tabs ----------------------------------------------------------
+    _STATE = ("project", "path", "dirty", "undo_stack", "redo_stack", "undo_desc", "redo_desc", "current_aid",
+              "current_material_id", "view_mode")
+
+    def _capture(self):
+        return {k: getattr(self, k) for k in self._STATE}
+
+    def _restore(self, st):
+        for k, v in st.items():
+            setattr(self, k, v)
+        self.canvas.selected_region = None
+        mode = self.view_mode
+        self.view_mode = "define"
+        self.a_define.setChecked(True)
+        self.canvas.zoom_fit()
+        if mode == "results" and self.current_analysis() and self.current_analysis().results:
+            self.set_view("results")
+        self.refresh_all()
+
+    def new_tab(self, project, path=None, title=None, dirty=False):
+        self.show_workspace()
+        self.docs[self._cur_tab] = self._capture()
+        self._tab_busy = True
+        i = self.tabbar.addTab(title or "Untitled")
+        self.docs.append(None)
+        self.tabbar.setCurrentIndex(i)
+        self._cur_tab = i
+        self._tab_busy = False
+        self.tabbar.setVisible(self.tabbar.count() > 1)
+        # the new tab gets its own undo lists (the old tab keeps its lists in self.docs)
+        self.undo_stack, self.redo_stack, self.undo_desc, self.redo_desc = [], [], [], []
+        self.set_project(project, path, dirty=dirty)
+        return i
+
+    def open_in_tab(self, path=None):
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, "Open in New Tab", self.last_dir(), FILTER)
+            if not path:
+                return None
+        try:
+            p = load_project(path)
+        except Exception as e:                       # noqa: BLE001
+            QMessageBox.critical(self, "Open failed", str(e))
+            return None
+        self.new_tab(p, path)
+        self.add_recent(path)
+        return p
+
+    def tab_changed(self, i):
+        if self._tab_busy or i < 0 or i == self._cur_tab or i >= len(self.docs):
+            return
+        self.docs[self._cur_tab] = self._capture()
+        self._cur_tab = i
+        if self.docs[i] is not None:
+            self._restore(self.docs[i])
+
+    def close_tab(self, i):
+        if i < 0:
+            return False
+        if self.tabbar.count() <= 1:
+            if not self.maybe_save():
+                return False
+            self.set_project(new_project(self.project.units))
+            return True
+        if i != self._cur_tab:
+            self.tabbar.setCurrentIndex(i)
+        if not self.maybe_save():
+            return False
+        self._tab_busy = True
+        self.docs.pop(i)
+        self.tabbar.removeTab(i)
+        self._cur_tab = self.tabbar.currentIndex()
+        self._tab_busy = False
+        if self.docs[self._cur_tab] is not None:
+            self._restore(self.docs[self._cur_tab])
+        self.tabbar.setVisible(self.tabbar.count() > 1)
+        return True
+
+    def maybe_save_all(self) -> bool:
+        if self.tabbar.count() <= 1:
+            return self.maybe_save()
+        start = self._cur_tab
+        for i in range(self.tabbar.count()):
+            st = self._capture() if i == self._cur_tab else self.docs[i]
+            if st and st.get("dirty"):
+                self.tabbar.setCurrentIndex(i)
+                if not self.maybe_save():
+                    return False
+        if start < self.tabbar.count():
+            self.tabbar.setCurrentIndex(start)
+        return True
+
+    # -- start page pictures ----------------------------------------------------
+    def _home_thumbnails(self):
+        from .extras import thumbnail
+        lst = self.home.recent
+        lst.setIconSize(QSize(96, 58))
+        for i in range(min(lst.count(), 8)):
+            it = lst.item(i)
+            path = it.data(Qt.UserRole)
+            if path:
+                icon = thumbnail(path)
+                if icon is not None:
+                    it.setIcon(icon)
+
+    # -- updates -------------------------------------------------------------
+    def check_updates(self, quiet=True, opener=None):
+        import time
+
+        from .extras import asset_for_this_computer, check_update
+        if quiet:
+            last = float(self.settings.value("update/last", 0) or 0)
+            if time.time() - last < 86400 or str(self.settings.value("update/auto", "true")).lower() == "false":
+                return None
+        self.settings.setValue("update/last", time.time())
+        try:
+            info = check_update(__version__, opener=opener)
+        except Exception as e:                       # noqa: BLE001
+            if not quiet:
+                QMessageBox.information(self, "Updates", f"Could not check for updates: {e}")
+            return None
+        if info is None:
+            if not quiet:
+                QMessageBox.information(self, "Updates", f"GeoLab {__version__} is the latest version.")
+            return None
+        self.log_msg(f"GeoLab {info['version']} is available (you have {__version__}).")
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return info
+        url = asset_for_this_computer(info["assets"]) or info["url"]
+        extra = ""
+        if sys.platform == "darwin":
+            extra = ("\n\nOn a Mac the easiest way is Terminal:\ncurl -fsSL https://raw.githubusercontent.com/"
+                     "ArghoAdhikary/GeoLab/main/install-mac.sh | bash")
+        r = QMessageBox.question(self, "Update available",
+                                 f"GeoLab {info['version']} is available (you have {__version__}).\n\n"
+                                 f"Download it now?{extra}")
+        if r == QMessageBox.Yes:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl(url))
+        return info
+
+    # -- early warning watch -------------------------------------------------
+    def start_warning_watch(self, dialog, hours=6.0):
+        from PySide6.QtCore import QTimer as _T
+        if self._watch and self._watch.get("timer"):
+            self._watch["timer"].stop()
+        params = {"lat": float(dialog.lat.text()), "lon": float(dialog.lon.text()), "past": dialog.past.value(),
+                  "fut": dialog.fut.value(), "method": dialog.method.currentData(), "settings": dialog.settings(),
+                  "place": dialog.place.currentText()}
+        t = _T(self)
+        t.timeout.connect(self.warning_tick)
+        t.start(int(hours * 3600 * 1000))
+        self._watch = {"params": params, "timer": t,
+                       "level": (self.last_warning or {}).get("level", "green")}
+        self.log_msg(f"Early warning: checking {params['place']} every {hours:g} hours while GeoLab is open.")
+        return self._watch
+
+    def warning_tick(self, opener=None):
+        from .. import warning as W
+        if not self._watch:
+            return None
+        q = self._watch["params"]
+        try:
+            series = W.fetch_forecast(q["lat"], q["lon"], q["past"], q["fut"], opener=opener)
+            pool = None
+            sl = [a for a in self.project.analyses if a.kind == "slope" and a.results and a.results.get("critical")]
+            if sl and self.project.piezometric_line and q["method"] == "quick":
+                from ..whatif import SurfacePool
+                pool = SurfacePool(self.project, sl[0], n=15)
+            res = (W.model_assessment(self.project, series, q["settings"]) if q["method"] == "model"
+                   else W.quick_assessment(series, pool, q["settings"]))
+        except Exception as e:                       # noqa: BLE001
+            self.log_msg(f"Early warning check failed: {e}")
+            return None
+        old = self._watch.get("level", "green")
+        self._watch["level"] = res["level"]
+        self.last_warning = {"result": res, "place": q["place"], "level": res["level"]}
+        self.log_msg(f"Early warning {q['place']}: {res['level'].upper()}")
+        if W.LEVELS.index(res["level"]) > W.LEVELS.index(old):
+            self.notify(f"Landslide early warning: {res['level'].upper()}",
+                        f"{q['place']}: the alert went from {old} to {res['level']} "
+                        f"(worst day {res.get('worst_day')}). Open Tools > Landslide Early Warning.")
+        return res
+
+    def notify(self, title, text):
+        self.statusBar().showMessage(f"{title}: {text}", 15000)
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return
+        from PySide6.QtWidgets import QSystemTrayIcon
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            if not hasattr(self, "_tray"):
+                self._tray = QSystemTrayIcon(self.windowIcon(), self)
+                self._tray.show()
+            self._tray.showMessage(title, text, QSystemTrayIcon.Warning, 20000)
+        else:
+            QMessageBox.warning(self, title, text)
+
     def closeEvent(self, e):
         if self.worker is not None:
             self.worker.cancelled = True
             self.worker.wait(3000)
-        if not self.maybe_save():
+        if not self.maybe_save_all():
             e.ignore()
             return
+        if self._watch and self._watch.get("timer"):
+            self._watch["timer"].stop()
         self.show_workspace()          # never remember the home page's hidden docks and toolbars
         self.settings.setValue("window/geometry", self.saveGeometry())
         self.settings.setValue("window/state", self.saveState())

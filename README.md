@@ -29,6 +29,17 @@
   (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, seepage (SEEP/W) and stress / consolidation analyses and their boundaries).
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
 
+### From the field to the design (2.12)
+
+- Cross-section from a map (ground levels from the Copernicus DEM).
+- Landslide early warning from the rain forecast.
+- Probabilistic analysis with a tornado chart.
+- Foundations and retaining walls.
+- Strength from lab tests, and SWCC / k from the grain size.
+- AutoCAD DXF import and export, quantities and cost, and comparing design options.
+- Command palette, project tabs, change history, version history, your own shortcuts and toolbar, crash
+  recovery and an update check.
+
 ### Looks and files (2.11)
 
 - Five interface styles and eight colour schemes, each with a day and a night version.
