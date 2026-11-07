@@ -1,0 +1,41 @@
+name: mac-debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        default: v2.11.0
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Download and launch the released app
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uname -m; sw_vers
+          gh release download "${{ inputs.tag }}" -R "${{ github.repository }}" -p GeoLab-macos.zip
+          ditto -x -k GeoLab-macos.zip .
+          file GeoLab.app/Contents/MacOS/GeoLab
+          codesign -dv --verbose=2 GeoLab.app || true
+          codesign --verify --deep --strict --verbose=2 GeoLab.app || true
+          spctl -a -vv GeoLab.app || true
+          ls GeoLab.app/Contents/MacOS | head; du -sh GeoLab.app
+          set +e
+          ./GeoLab.app/Contents/MacOS/GeoLab --screenshot "$PWD/shot.png" > out.txt 2>&1 &
+          pid=$!
+          sleep 60
+          kill $pid 2>/dev/null
+          echo "---- output"; cat out.txt
+          ls -la shot.png
+          true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-${{ matrix.os }}
+          path: shot.png
