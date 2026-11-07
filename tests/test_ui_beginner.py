@@ -139,7 +139,8 @@ def test_help_window_tutorials_and_examples(win, app, tmp_path, monkeypatch):
     assert w.ex_btn.isVisible()
     w.ex_btn.click()                                   # opens the tutorial's example in the main window
     assert win.project.title.startswith("Homogeneous slope")
-    w.show_page(len(w.pages) - 9)                       # tutorial 2: Quick Slope inputs
+    w.show_page(next(i for i, (k, pg) in enumerate(w.pages)      # tutorial 2: Quick Slope inputs
+                     if k == "tutorial" and pg["title"].startswith("Tutorial 2 ")))
     win.dirty = False
     w.ex_btn.click()
     assert len(win.project.regions) == 2 and win.project.piezometric_line

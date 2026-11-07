@@ -30,10 +30,24 @@ def quick_slope(q: dict) -> Project:
     p = new_project()
     p.materials.clear()
     p.title = q.get("title") or f"{H:g} m slope at {ratio:g}H:1V"
-    x_toe, x_crest = toe, toe + ratio * H
+    berm = max(_num(q.get("berm", 0) or 0), 0.0)          # bench width part-way up the slope
+    berm_at = min(max(_num(q.get("berm_at", 0.5) or 0.5), 0.1), 0.9)
+    x_toe, x_crest = toe, toe + ratio * H + berm
     x_end = x_crest + crest
     y_toe, y_top = base, base + H
-    ground = [(0.0, y_toe), (x_toe, y_toe), (x_crest, y_top), (x_end, y_top)]
+    scour = max(_num(q.get("scour", 0) or 0), 0.0)        # scour hole in front of the toe (river banks)
+    if scour > 0:
+        scour = min(scour, base - 0.5)
+        if x_toe < 3.5 * scour:
+            raise ValueError("The toe width must be at least 3.5 x the scour depth.")
+        ground = [(0.0, y_toe), (x_toe - 3 * scour, y_toe), (x_toe - 1.5 * scour, y_toe - scour),
+                  (x_toe - 0.5 * scour, y_toe - scour), (x_toe, y_toe)]
+    else:
+        ground = [(0.0, y_toe), (x_toe, y_toe)]
+    if berm > 0:
+        xb, yb = x_toe + ratio * H * berm_at, y_toe + H * berm_at
+        ground += [(xb, yb), (xb + berm, yb)]
+    ground += [(x_crest, y_top), (x_end, y_top)]
 
     def clipped_top(hi, lo):
         """Ground line clipped to lo <= y <= hi, with the exact crossing points."""
@@ -90,4 +104,5 @@ def quick_slope(q: dict) -> Project:
     if sq > 0:
         p.surcharges.append(Surcharge(x_crest + 0.1 * crest, x_crest + 0.6 * crest, sq))
     _auto_search(p, a)
+    p.quick = {k: v for k, v in q.items() if k != "title"}
     return p

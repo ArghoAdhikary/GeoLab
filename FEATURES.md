@@ -106,6 +106,26 @@ directly with another vendor's software.
 | Example files: every example solved and saved as .slab (Help > Example Files Folder, GeoLab-examples.zip) | files written and read back (`test_help.py`) |
 | Intel MKL PARDISO sparse direct solver on Windows for systems above 30 000 unknowns; SciPy SuperLU below that, on macOS and on phones | same solution to round-off (residual ~1e-15); full test suite passes with MKL loaded; factorisation 5-8 times faster at 50 000-200 000 unknowns |
 
+### Added in 2.10 (design tools)
+
+| Feature | Verified by |
+|---|---|
+| Quick re-evaluation of the slip surfaces of the last search (what-if sliders, optimizer, back-analysis, AS 4678 check) | pool minimum equals the full search; changes act in the right direction (`test_design_tools.py`) |
+| Design codes: Australian Standards (default) and BNBC 2020: minimum F by case, AS 4678 factored check, AS 1170.4 / BNBC seismic kh | PGA and kh against hand calculation; code check on the benchmark slope; tutorials 11 and 13 |
+| Back-analysis of strength (one parameter, c'-phi' line) and of k from piezometers | c' = 3.22 kPa at F = 1 for the benchmark; k of a dam fill recovered from its own heads |
+| Design optimizer: slope ratio, berm, drain depth, reinforcement, largest crest load | target reached and confirmed by a full search |
+| Liquefaction: SPT (Idriss & Boulanger 2014), CPT (Robertson & Wride 1998), LPI | (N1)60cs, CRR, CSR and FS against a hand calculation |
+| Boreholes / CPT from CSV or Excel to a cross-section with correlated parameters | sample logs give a valid section; .xlsx read without extra libraries |
+| Rainfall from Open-Meteo, CSV or a design storm on the climate boundary | parsed and applied (network call replaced in the tests) |
+| Monitoring data compared with seepage / stress results | computed heads match their own readings |
+| River bank and flood embankment templates | valid geometry; results quoted in tutorials 11 and 13 are checked |
+| Word (.docx) and PDF design report | report written and opened as a zip / PDF; pictures included |
+| Model from a photo or sketch (Claude) | request with the picture checked with a fake client |
+| Python console; Bangla interface | console runs code; menus translated (`test_ui_design.py`) |
+
+The design code values (minimum factors, AS 4678 soil factors, hazard factors) are GeoLab's defaults and
+can be edited. The project specification and the standards themselves govern.
+
 ## Not implemented
 
 | Feature | Notes |

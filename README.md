@@ -29,6 +29,24 @@
   (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, seepage (SEEP/W) and stress / consolidation analyses and their boundaries).
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
 
+### Design tools (2.10)
+
+- **Design codes:** Australian Standards (the default) and BNBC 2020, covering:
+  - minimum factors of safety by design case
+  - AS 4678 partial factors
+  - the seismic kh from AS 1170.4 or the BNBC seismic zones
+  - liquefaction from SPT or CPT
+- **What-if sliders**, a **design optimizer** (flatter slope, berm, drain, reinforcement, largest load)
+  and **back-analysis** of failures (strength, the c'-phi' line, k from piezometers).
+- **Boreholes / CPT** from CSV or Excel become a cross-section with parameters from correlations.
+- **Real rainfall** of any place (Open-Meteo) on the climate boundary.
+- **Monitoring data** compared with the model.
+- **Model from a photo or sketch** (AI).
+- **River bank** and **flood embankment** templates.
+- A **Word / PDF design report**.
+- A **Python console**.
+- A **Bangla** interface.
+
 See [FEATURES.md](FEATURES.md) for exactly what is and isn't implemented, and how each feature was tested.
 
 ## Install
@@ -92,7 +110,7 @@ with more than 30 000 unknowns).
 
 ## Using it
 
-The full manual and ten tutorials are in **Help > User Manual** and **Help > Tutorials** (and in
+The full manual and 13 tutorials are in **Help > User Manual** and **Help > Tutorials** (and in
 `GeoLab-User-Manual.pdf` on the releases page). In short:
 
 1. The start page offers a new slope or seepage project, examples, recent files and the AI builder.

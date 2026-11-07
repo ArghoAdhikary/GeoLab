@@ -328,7 +328,14 @@ EXAMPLES = {
     "Soft clay under a fill (Cam Clay)": cam_clay_embankment,
     "Anchored excavation (staged)": braced_excavation,
     "Rapid drawdown (Duncan-Wright-Wong)": rapid_drawdown_dww,
+    "River bank: flood, drawdown, toe scour": lambda: _template("riverbank"),
+    "Flood embankment on soft clay": lambda: _template("flood_embankment"),
 }
+
+
+def _template(name):
+    from . import templates
+    return getattr(templates, name)()
 
 
 def example_file_name(name: str) -> str:

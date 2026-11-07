@@ -618,4 +618,5 @@ def run_consolidation(project, analysis, progress=None, cancel=None, parent=None
     return _results(project, mesh, model, u[:nd2], sig, u_gp, analysis, {
         "converged": yield_ok, "stress_type": "consolidation", "times": times, "excess_pwp": p.tolist(),
         "excess_history": p_hist, "settlement_history": settle, "monitor_node": int(top),
+        "dy_history": [[round(float(v), 7) for v in d] for d in dy_hist],
         "structures": structs.results(u), "staged": bool(model.inactive.any())})

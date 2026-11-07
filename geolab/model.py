@@ -496,6 +496,11 @@ class Project:
     mesh_lines: list = field(default_factory=list)     # interior lines the mesh follows (e.g. drains)
     structures: list[Structure] = field(default_factory=list)
     grid_spacing: float = 1.0
+    quick: dict = field(default_factory=dict)          # Quick Slope inputs (lets the optimizer rebuild it)
+    design_code: str = "AS"                            # AS (Australian Standards) | BNBC | none
+    code_settings: dict = field(default_factory=dict)  # site, importance, consequence, ...
+    observations: list = field(default_factory=list)   # monitoring readings [{instrument, kind, x, y, time, value}]
+    boreholes: list = field(default_factory=list)      # imported borehole / CPT logs
 
     # -- lookups -------------------------------------------------------
     @property

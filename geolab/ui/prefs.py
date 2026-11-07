@@ -95,8 +95,29 @@ class PreferencesDialog(QDialog):
         note.setEnabled(False)
         gl.addWidget(note)
         v.addWidget(g)
+        from ..i18n import LANGUAGES
+        lg = QGroupBox("Language")
+        ll = QVBoxLayout(lg)
+        self.lang_group = QButtonGroup(self)
+        cur_lang = self.qs.value("ui/language", "en") or "en"
+        self.lang_buttons = {}
+        for key, label in LANGUAGES.items():
+            b = QRadioButton(label)
+            b.setChecked(key == cur_lang)
+            self.lang_group.addButton(b)
+            self.lang_buttons[key] = b
+            ll.addWidget(b)
+        ln = QLabel("Restart GeoLab to change the language of the menus and windows. "
+                    "বাংলা: মেনু ও উইন্ডো বাংলায় দেখাতে GeoLab আবার চালু করুন।")
+        ln.setWordWrap(True)
+        ln.setEnabled(False)
+        ll.addWidget(ln)
+        v.addWidget(lg)
         v.addStretch(1)
         return w
+
+    def language(self) -> str:
+        return next((k for k, b in self.lang_buttons.items() if b.isChecked()), "en")
 
     def _ai(self):
         w = QWidget()
@@ -221,6 +242,7 @@ class PreferencesDialog(QDialog):
         self._store_fields(self.provider.currentData())
         qs = self.qs
         qs.setValue("ui/theme", self.theme())
+        qs.setValue("ui/language", self.language())
         qs.setValue("ai/chat_enabled", "true" if self.enabled.isChecked() else "false")
         qs.setValue("ai/provider", self.provider.currentData())
         qs.setValue("ai/base_url", self.base.text().strip())

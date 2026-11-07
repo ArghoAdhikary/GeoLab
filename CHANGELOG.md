@@ -1,5 +1,49 @@
 # Changelog
 
+## 2.10.0 - 2026-11-07
+
+### Design codes
+
+- Design > Design Code Check covers Australian Standards (the default for new projects) and BNBC 2020.
+  - Minimum factors of safety for the long-term, temporary, earthquake and rapid drawdown cases.
+  - The AS 4678 limit state check: soil uncertainty factors on c' and tan(phi'), live load x 1.5.
+  - The seismic coefficient from AS 1170.4 (kp, Z, site class) or BNBC 2020 (zone, site class,
+    importance), which can be written into the earthquake analyses.
+
+### New design tools
+
+- **What-if sliders:** move the water table, loads, strength or kh, and the factor of safety and slip
+  surface update in under a second.
+- **Design optimizer:** finds the smallest change that reaches a target F (slope steepness, berm, drainage,
+  reinforcement length or capacity), or the largest crest load that still meets the target.
+- **Back-analysis:** the strength that explains an observed failure (F = 1), and the line of (c', phi')
+  pairs that do. Tools > Calibrate k from Piezometers does the same for hydraulic conductivity.
+- **Liquefaction check:** SPT (Idriss & Boulanger 2014) or CPT (Robertson & Wride 1998), giving FS with
+  depth and the LPI.
+
+### Data import and AI
+
+- **Boreholes and CPT:** import logs from CSV or Excel, estimate parameters from N or the cone, and build
+  the cross-section automatically.
+- **Rainfall:** real daily rainfall and evaporation of any place (Open-Meteo archive), a CSV file or a
+  design storm, put on the climate boundary.
+- **Monitoring data:** import piezometers, settlement plates and inclinometers, and compare them with the
+  model (RMS error).
+- **Model from a photo or sketch:** Claude reads the picture and builds the model.
+
+### Templates, reports and other additions
+
+- **River bank and flood embankment templates:** File > New River Bank (flood, rapid drawdown, toe scour,
+  earthquake) and File > New Flood Embankment (levee on soft clay).
+- **Design report:** a Word (.docx) or PDF report with pictures, results, the code check, liquefaction
+  and monitoring.
+- **Python console:** Tools > Python Console for scripting the open model.
+- **Bangla interface:** Edit > Preferences > Language. The menus, buttons and step guide are translated,
+  and there is a Bangla getting-started chapter.
+- Quick Slope can now add a berm and a scour hole at the toe.
+- The manual has two new chapters (design tools, Bangla) and three new tutorials (river bank with BNBC,
+  back-analysis and redesign, flood embankment with the code check and the report).
+
 ## 2.9.0 - 2026-11-07
 
 - User manual (GeoLab-User-Manual.pdf, 40 pages with screenshots) and ten step-by-step tutorials: first

@@ -79,7 +79,8 @@ class StepBar(QFrame):
         top.addLayout(self.row)
         top.addStretch(1)
         self.close_btn = QToolButton()
-        self.close_btn.setText("Hide guide")
+        from ..i18n import tr
+        self.close_btn.setText(tr("Hide guide"))
         self.close_btn.setToolTip("Hide the step guide (View > Show Step Guide brings it back)")
         top.addWidget(self.close_btn)
         lay.addLayout(top)
@@ -94,7 +95,8 @@ class StepBar(QFrame):
             b.hide()
             b.deleteLater()
         self.buttons = []
-        steps = steps_for(project, analysis)
+        from ..i18n import tr
+        steps = [(k, tr(t), d, tr(h)) for k, t, d, h in steps_for(project, analysis)]
         nxt = next((i for i, s in enumerate(steps) if not s[2]), len(steps) - 1)
         dark = is_dark()
         for i, (key, title, done, hint) in enumerate(steps):
@@ -113,8 +115,8 @@ class StepBar(QFrame):
             self.row.addWidget(b)
             self.buttons.append(b)
         key, title, done, hint = steps[nxt]
-        self.hint.setText(f"<b>Next: {title}.</b> {hint}" if not all(s[2] for s in steps[:-1]) or nxt < len(steps) - 1
-                          else f"<b>Done.</b> {steps[-1][3]}")
+        self.hint.setText(f"<b>{tr('Next')}: {title}.</b> {hint}" if not all(s[2] for s in steps[:-1])
+                          or nxt < len(steps) - 1 else f"<b>{tr('Done')}.</b> {steps[-1][3]}")
         self.setStyleSheet("#stepbar { border-bottom: 1px solid %s; background: %s; }"
                            % (("#313b47", "#1b2129") if dark else ("#d6dce4", "#fafbfd")))
 

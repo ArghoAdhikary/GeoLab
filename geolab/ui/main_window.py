@@ -326,12 +326,38 @@ class MainWindow(QMainWindow):
         self.a_ex_folder = A("&Example Files Folder", self.open_examples_folder,
                              tip="Every example as a .slab file (solved) in Documents / GeoLab Examples")
         self.a_about = A("&About", self.about)
+        # design tools (2.10)
+        self.a_backcalc = A("&Back-Analysis (from a failure)...", lambda: self.tool("backcalc"),
+                            tip="Find the soil strength that explains an observed slope failure (F = 1)")
+        self.a_calib_k = A("&Calibrate k from Piezometers...", lambda: self.tool("calibrate"),
+                           tip="Find the hydraulic conductivity that matches measured heads")
+        self.a_optimizer = A("Design &Optimizer...", lambda: self.tool("optimizer"), "Ctrl+Shift+O",
+                             tip="The smallest change (flatter slope, berm, drain, reinforcement) that reaches a target F")
+        self.a_whatif = A("&What-If Sliders...", self.what_if, "Ctrl+Shift+W",
+                          tip="Move sliders for water, loads, strength and earthquake; F follows at once")
+        self.a_code = A("Design &Code Check...", lambda: self.tool("code"), "Ctrl+Shift+K",
+                        tip="Australian Standards (default) or BNBC 2020: minimum F, AS 4678 factors, seismic kh")
+        self.a_liq = A("&Liquefaction Check (SPT / CPT)...", lambda: self.tool("liquefaction"))
+        self.a_boreholes = A("Import &Boreholes / CPT...", lambda: self.tool("boreholes"),
+                             tip="Build the cross-section and soil parameters from borehole or CPT logs (CSV, Excel)")
+        self.a_rain = A("&Rainfall from Weather Data...", lambda: self.tool("rainfall"),
+                        tip="Real daily rainfall of a place (Open-Meteo), a CSV file or a design storm")
+        self.a_monitor = A("&Monitoring Data...", lambda: self.tool("monitoring"),
+                           tip="Piezometers, settlement plates, inclinometers compared with the model")
+        self.a_photo = A("Model from &Photo or Sketch (AI)...", lambda: self.tool("photo"))
+        self.a_dreport = A("Design &Report (Word / PDF)...", self.design_report, "Ctrl+Alt+R")
+        self.a_console = A("&Python Console", self.toggle_console, "Ctrl+Shift+P")
+        self.a_riverbank = A("New &River Bank...", lambda: self.new_template("riverbank"))
+        self.a_levee = A("New &Flood Embankment...", lambda: self.new_template("levee"))
+        self.a_bangla = A("Bangla Getting Started", lambda: self.show_help(page=self._bangla_page()))
 
     def _build_menus(self):
         mb = self.menuBar()
         m = mb.addMenu("&File")
         m.addAction(self.a_new)
         m.addAction(self.a_quick)
+        m.addAction(self.a_riverbank)
+        m.addAction(self.a_levee)
         nm = m.addMenu("New by &Analysis Type")
         for a in self.a_new_kind.values():
             nm.addAction(a)
@@ -404,6 +430,16 @@ class MainWindow(QMainWindow):
                   None, self.a_del_analysis, self.a_clear):
             m.addSeparator() if a is None else m.addAction(a)
 
+        m = mb.addMenu("Desi&gn")
+        for a in (self.a_code, self.a_optimizer, self.a_whatif, None, self.a_backcalc, self.a_liq, None,
+                  self.a_dreport):
+            m.addSeparator() if a is None else m.addAction(a)
+
+        m = mb.addMenu("&Tools")
+        for a in (self.a_boreholes, self.a_rain, self.a_monitor, self.a_calib_k, None, self.a_photo, None,
+                  self.a_console):
+            m.addSeparator() if a is None else m.addAction(a)
+
         self.window_menu = mb.addMenu("&Window")
         for a in (self.a_solve_mgr, self.a_verify, self.a_solve, self.a_solve_all, self.a_stop):
             self.window_menu.addAction(a)
@@ -422,6 +458,7 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_tutorials)
         m.addAction(self.a_pdf_manual)
         m.addAction(self.a_ex_folder)
+        m.addAction(self.a_bangla)
         m.addSeparator()
         m.addAction(self.a_chat)
         m.addAction(self.a_ai)
@@ -1894,6 +1931,99 @@ class MainWindow(QMainWindow):
         r = open_examples_folder(self)
         if r:
             self.log_msg(f"{r[1]} example files in {r[0]}")
+
+    # -- design tools ----------------------------------------------------------------
+    def tool(self, name, run=True):
+        from . import tools
+        p = self.project
+        if name in ("backcalc", "optimizer") and not tools._need(self, "a slope stability analysis",
+                                                                 tools.slope_analyses(p)):
+            return None
+        if name == "calibrate" and not tools._need(self, "a seepage analysis",
+                                                   [a for a in p.analyses if a.kind == "seepage"]):
+            return None
+        if name in ("backcalc", "optimizer"):
+            a = self.current_analysis()
+            if a is None or a.kind != "slope":
+                a = tools.slope_analyses(p)[0]
+                self.current_aid = a.id
+            if not (a.results and a.results.get("critical")):
+                QMessageBox.information(self, APP_NAME, f"Solve '{a.name}' first (F5): the tool starts from "
+                                                        "its slip surfaces.")
+                return None
+        cls = {"backcalc": tools.BackAnalysisDialog, "calibrate": tools.CalibrateKDialog,
+               "optimizer": tools.OptimizerDialog, "code": tools.CodeDialog,
+               "liquefaction": tools.LiquefactionDialog, "boreholes": tools.BoreholeDialog,
+               "rainfall": tools.RainfallDialog, "monitoring": tools.MonitoringDialog,
+               "photo": tools.PhotoDialog}[name]
+        d = cls(self)
+        if run:
+            d.exec()
+            self.refresh_all()
+        return d
+
+    def what_if(self, run=True):
+        from . import tools
+        from ..whatif import SurfacePool
+        a = self.current_analysis()
+        if a is None or a.kind != "slope":
+            cands = tools.slope_analyses(self.project, solved_only=True)
+            if not cands:
+                QMessageBox.information(self, APP_NAME, "Solve a slope stability analysis first (F5).")
+                return None
+            a = cands[0]
+        if not (a.results and a.results.get("critical")):
+            QMessageBox.information(self, APP_NAME, f"Solve '{a.name}' first (F5).")
+            return None
+        try:
+            pool = SurfacePool(self.project, a)
+        except ValueError as e:
+            QMessageBox.information(self, APP_NAME, str(e))
+            return None
+        d = tools.WhatIfDialog(self, pool)
+        if run:
+            d.exec()
+        return d
+
+    def design_report(self):
+        from .tools import design_report
+        return design_report(self)
+
+    def toggle_console(self):
+        d = getattr(self, "console_dock", None)
+        if d is None:
+            from .console import Console
+            d = QDockWidget("Python Console", self)
+            d.setObjectName("console")
+            d.setWidget(Console(self))
+            self.addDockWidget(Qt.BottomDockWidgetArea, d)
+            self.console_dock = d
+            self.window_menu.addAction(d.toggleViewAction())
+            d.show()
+            return d
+        d.setVisible(not d.isVisible())
+        return d
+
+    def new_template(self, kind, run=True):
+        from .tools import TemplateDialog
+        if not self.maybe_save():
+            return None
+        d = TemplateDialog(self, "riverbank" if kind == "riverbank" else "levee")
+        if not run:
+            return d
+        if not d.exec() or d.project is None:
+            return None
+        d.project.design_code = self.project.design_code or "AS"
+        self.show_workspace()
+        self.set_project(d.project, dirty=True)
+        self.canvas.zoom_fit()
+        if d.solve_now.isChecked():
+            self.solve_all()
+        return d.project
+
+    def _bangla_page(self):
+        from .. import help as docs
+        return next((i for i, c in enumerate(docs.chapters()) if "বাংলা" in c["title"]), 0)
 
     def quick_guide(self):
         TextDialog("Quick Guide", GUIDE, self).exec()

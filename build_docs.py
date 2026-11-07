@@ -120,6 +120,27 @@ def screenshots(app, solved: dict):
     app.processEvents()
     d.grab().save(str(IMG / "quick_slope.png"))
     d.close()
+
+    # design tools (2.10)
+    show("Flood embankment on soft clay", 1, keep=True)
+    wi = w.what_if(run=False)
+    wi.resize(980, 720)
+    wi.show()
+    app.processEvents()
+    wi.update_fos()
+    app.processEvents()
+    wi.grab().save(str(IMG / "whatif.png"))
+    wi.close()
+    cd = w.tool("code", run=False)
+    cd.code.setCurrentIndex(cd.code.findData("BNBC"))
+    cd.resize(820, 700)
+    cd.show()
+    cd.check()
+    cd.job.wait()
+    app.processEvents()
+    cd.grab().save(str(IMG / "code_check.png"))
+    cd.close()
+    canvas("riverbank.png", name="River bank: flood, drawdown, toe scour", index=1)
     w.dirty = False
     w.close()
     print(f"  {len(list(IMG.glob('*.png')))} pictures in {IMG}")
@@ -132,7 +153,7 @@ def _copy(p):
 
 # ---------------------------------------------------------------------------------------------- PDF
 CSS = """
-body { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 10pt; color: #1b1b1b; }
+body { font-family: 'Segoe UI', 'Nirmala UI', 'Helvetica Neue', Arial, sans-serif; font-size: 10pt; color: #1b1b1b; }
 h1 { font-size: 20pt; color: #1d4e89; margin-top: 0; }
 h2 { font-size: 13.5pt; color: #1d4e89; margin-top: 14px; }
 h3 { font-size: 11pt; color: #333; }

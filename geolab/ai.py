@@ -157,3 +157,60 @@ def generate_project(prompt: str, api_key: str | None = None, client=None) -> tu
     except json.JSONDecodeError as e:
         raise AIError("The AI response was not valid JSON.") from e
     return project_from_ai(data)
+
+
+IMAGE_SYSTEM = SYSTEM + """
+The user sends a picture: a photo of a slope or bank, a hand sketch, or a drawing of a cross-section
+(possibly with dimensions, layers, borehole logs or a water level). Read the geometry from it:
+- Use dimensions written on the picture. Without them, estimate the scale from what is visible (a
+  person about 1.7 m tall, a storey about 3 m, a car about 1.5 m high) and say so in "assumptions".
+- Draw the section across the slope at its steepest part, the crest on one side and the toe on the other.
+- Layers seen in the picture (colours, a clay top over sand, rock outcrop) become separate materials.
+- A river, pond or wet seepage line seen in the picture becomes the piezometric line."""
+
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+               ".gif": "image/gif"}
+
+
+def generate_from_image(image: bytes, media_type: str, note: str = "", api_key: str | None = None,
+                        client=None, model: str | None = None) -> tuple[Project, str]:
+    """A model from a photo or sketch of a slope (Claude reads the picture). Returns (project, assumptions)."""
+    import base64
+    if media_type not in IMAGE_TYPES.values():
+        raise AIError("Use a PNG, JPEG, WebP or GIF picture.")
+    if len(image) > 5 * 1024 * 1024:
+        raise AIError("The picture is larger than 5 MB. Make it smaller and try again.")
+    import anthropic
+    if client is None:
+        client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+    content = [{"type": "image", "source": {"type": "base64", "media_type": media_type,
+                                            "data": base64.b64encode(image).decode("ascii")}},
+               {"type": "text", "text": (note.strip() or "Make a slope stability model of this.")}]
+    try:
+        resp = client.beta.messages.create(
+            model=model or MODEL,
+            max_tokens=16000,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            output_config={"effort": "medium", "format": {"type": "json_schema", "schema": SCHEMA}},
+            system=IMAGE_SYSTEM,
+            messages=[{"role": "user", "content": content}],
+        )
+    except anthropic.AuthenticationError as e:
+        raise AIError("The API key was rejected. Check it in Settings > AI Assistant.") from e
+    except anthropic.RateLimitError as e:
+        raise AIError("Rate limited by the API. Wait a moment and try again.") from e
+    except anthropic.APIStatusError as e:
+        raise AIError(f"The API returned an error ({e.status_code}): {e.message}") from e
+    except anthropic.APIConnectionError as e:
+        raise AIError("Could not reach the API. Check your internet connection.") from e
+    if resp.stop_reason == "refusal":
+        raise AIError("The request was declined by the model.")
+    if resp.stop_reason == "max_tokens":
+        raise AIError("The response was cut off. Try a simpler picture.")
+    text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise AIError("The AI response was not valid JSON.") from e
+    return project_from_ai(data)

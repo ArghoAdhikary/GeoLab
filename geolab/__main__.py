@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 
@@ -90,8 +91,14 @@ def run_gui(argv) -> int:
     app.setOrganizationName("GeoLab")
     app.setStyle("Fusion")
     app.setWindowIcon(make_icon())
-    from .ui.main_window import MainWindow
+    from . import i18n
+    from .ui.main_window import MainWindow, _app_settings
+    lang = os.environ.get("GEOLAB_LANG") or str(_app_settings().value("ui/language", "en") or "en")
+    i18n.set_language(lang)
+    if i18n.language() != "en":
+        i18n.install(app)
     w = MainWindow()
+    i18n.translate_widget(w)
     w.show()
     if argv and argv[0] == "--screenshot":
         # smoke test for packaged builds: open an example, solve, save a screenshot, exit
