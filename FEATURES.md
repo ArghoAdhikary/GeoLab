@@ -106,6 +106,17 @@ directly with another vendor's software.
 | Example files: every example solved and saved as .slab (Help > Example Files Folder, GeoLab-examples.zip) | files written and read back (`test_help.py`) |
 | Intel MKL PARDISO sparse direct solver on Windows for systems above 30 000 unknowns; SciPy SuperLU below that, on macOS and on phones | same solution to round-off (residual ~1e-15); full test suite passes with MKL loaded; factorisation 5-8 times faster at 50 000-200 000 unknowns |
 
+### Added in 2.11 (looks and files)
+
+| Feature | Verified by |
+|---|---|
+| Interface styles (5) and colour schemes (8, day and night), accent colour, interface font | every style sheet parses; palette and style sheet checked (`test_appearance.py`) |
+| Colour and font for each part of the window (20 parts, including the Windows 11 title bar and the chat) | settings round trip; the colours reach the style sheet, the chat and the canvas |
+| Added fonts (.ttf / .otf) and theme files | font loaded and removed; theme file round trip |
+| Autosave (on by default, .bak copy, recovery folder) | autosave writes the file or the recovery copy |
+| Cloud drive backup (Google Drive, OneDrive, Dropbox, iCloud) with versions | dated copies, pruning, drive detection |
+| Save As .gsz and Export as PDF (all analyses) | files written and opened as a zip / PDF |
+
 ### Added in 2.10 (design tools)
 
 | Feature | Verified by |

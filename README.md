@@ -29,6 +29,14 @@
   (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, seepage (SEEP/W) and stress / consolidation analyses and their boundaries).
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
 
+### Looks and files (2.11)
+
+- Five interface styles and eight colour schemes, each with a day and a night version.
+- A colour and a font for every part of the window, including the title bar, menus, toolbars, panels,
+  the chat head and the chat box. You can add your own fonts and save themes.
+- Autosave is on by default, with backup copies to Google Drive, OneDrive, Dropbox or iCloud.
+- Save As GeoStudio (.gsz), and Export as PDF for one analysis or all of them.
+
 ### Design tools (2.10)
 
 - **Design codes:** Australian Standards (the default) and BNBC 2020, covering:

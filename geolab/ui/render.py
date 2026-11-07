@@ -147,7 +147,11 @@ class Renderer:
             self.o.update(opts)
         self.fs = 1.0 if self.o["screen"] else 0.6   # font scale for print
         from .theme import CANVAS
-        self.c = CANVAS[bool(self.o["dark"] and self.o["screen"])]  # night colours on screen only
+        if self.o["screen"]:                         # night colours and the user's colours on screen only
+            from .appearance import canvas_colors
+            self.c = canvas_colors(bool(self.o["dark"]))
+        else:
+            self.c = CANVAS[False]
 
     # -- helpers ---------------------------------------------------------
     def pen(self, color, w=1.0, style=Qt.SolidLine):
@@ -158,6 +162,11 @@ class Renderer:
 
     def font(self, size, bold=False):
         f = QFont("Segoe UI")
+        if self.o["screen"]:
+            from .appearance import font as user_font
+            uf = user_font("canvas")
+            if uf is not None:
+                f.setFamily(uf.family())
         f.setPointSizeF(size * self.fs)
         f.setBold(bold)
         return f

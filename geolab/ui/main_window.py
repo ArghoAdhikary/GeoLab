@@ -6,7 +6,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QImage, QKeySequence, QPainter
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFileDialog,
                                QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
@@ -67,6 +67,23 @@ class SolveWorker(QThread):
 
 
 _EXTRA_WINDOWS: list = []        # windows opened by the AI assistant (kept alive)
+_TITLEBAR_FILTER = []
+
+
+def _install_titlebar_filter():
+    """Colour every window's title bar as it opens (Windows 11 only; elsewhere a no-op)."""
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is not None and not _TITLEBAR_FILTER and sys.platform == "win32":
+        from .appearance import TitleBarFilter
+        _TITLEBAR_FILTER.append(TitleBarFilter(app))
+
+
+def _setting_on(qs, key, default):
+    v = qs.value(key, None)
+    if v is None or v == "":
+        return default
+    return str(v).lower() in ("true", "1", "yes")
 
 
 def _app_settings():
@@ -136,6 +153,10 @@ class MainWindow(QMainWindow):
         self._build_status()
         self.canvas.status.connect(self.mode_label.setText)
         self.canvas.coords.connect(self._cursor_moved)
+        from . import appearance
+        appearance.load(self.settings)
+        appearance.load_user_fonts()
+        _install_titlebar_filter()
         theme_manager().changed.connect(self._theme_changed)
         apply_theme(self.settings.value("ui/theme", "auto") or "auto")
         self._theme_changed(is_dark())
@@ -144,6 +165,10 @@ class MainWindow(QMainWindow):
         geom = self.settings.value("window/geometry")
         if geom is not None:
             self.restoreGeometry(geom)
+        self._last_backup = 0.0
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.timeout.connect(self.autosave)
+        self.setup_autosave()
         self.refresh_all()
 
     # ------------------------------------------------------------------
@@ -212,6 +237,13 @@ class MainWindow(QMainWindow):
         self.a_open = A("&Open...", self.open_file, "Ctrl+O", S.SP_DialogOpenButton)
         self.a_save = A("&Save", self.save, "Ctrl+S", S.SP_DialogSaveButton)
         self.a_save_as = A("Save &As...", self.save_as, "Ctrl+Shift+S")
+        self.a_save_gsz = A("Save As &GeoStudio (.gsz)...", self.export_gsz, "Ctrl+Alt+S",
+                            tip="Write the project as a GeoStudio .gsz file")
+        self.a_save_pdf = A("Export as P&DF...", self.export_pdf_dialog, "Ctrl+Shift+E",
+                            tip="PDF of the current view, of every analysis, or the design report")
+        self.a_recover = A("Recover &Autosaved Project...", self.recover_autosave)
+        self.a_backup = A("&Back Up to Cloud Drive Now", self.backup_now_action,
+                          tip="Copy the project to the Google Drive / OneDrive / Dropbox folder")
         self.a_pdf = A("Export &PDF...", self.export_pdf, "Ctrl+E", S.SP_FileDialogDetailedView)
         self.a_png = A("Export &Image (PNG)...", self.export_png)
         self.a_csv = A("Export Results (&CSV)...", self.export_csv)
@@ -315,6 +347,20 @@ class MainWindow(QMainWindow):
             self.theme_group.addAction(ta)
             self.a_theme[key] = ta
         self.a_theme.get(self.settings.value("ui/theme", "auto") or "auto", self.a_theme["auto"]).setChecked(True)
+        from . import appearance as _ap
+        self.style_group = QActionGroup(self)
+        self.a_style = {}
+        for key, label in _ap.STYLES.items():
+            sa = A(label, lambda _=False, k=key: self.set_ui_style(style=k), checkable=True)
+            self.style_group.addAction(sa)
+            self.a_style[key] = sa
+        self.scheme_group = QActionGroup(self)
+        self.a_scheme = {}
+        for key, d in _ap.SCHEMES.items():
+            ca = A(d["label"], lambda _=False, k=key: self.set_ui_style(scheme=k), checkable=True)
+            self.scheme_group.addAction(ca)
+            self.a_scheme[key] = ca
+        self.a_customise = A("&Customise Colours and Fonts...", lambda: self.preferences("advanced"))
         self.a_reset = A("&Reset Window Layout", self.reset_layout)
         self.a_start = A("&Start Page", self.show_start)
         self.a_guide = A("&Quick Guide", self.quick_guide, "F1")
@@ -370,10 +416,14 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction(self.a_save)
         m.addAction(self.a_save_as)
+        m.addAction(self.a_save_gsz)
+        m.addAction(self.a_save_pdf)
+        m.addAction(self.a_recover)
+        m.addAction(self.a_backup)
         m.addSeparator()
         m.addAction(self.a_import)
         exp = m.addMenu("E&xport")
-        for a in (self.a_pdf, self.a_png, self.a_csv, self.a_json, self.a_gsz):
+        for a in (self.a_pdf, self.a_save_pdf, self.a_png, self.a_csv, self.a_json, self.a_gsz):
             exp.addAction(a)
         m.addAction(self.a_print)
         m.addSeparator()
@@ -399,6 +449,14 @@ class MainWindow(QMainWindow):
         tm = m.addMenu("&Theme")
         for a in self.a_theme.values():
             tm.addAction(a)
+        sm = m.addMenu("Interface &Style")
+        for a in self.a_style.values():
+            sm.addAction(a)
+        cm = m.addMenu("Colour Sc&heme")
+        for a in self.a_scheme.values():
+            cm.addAction(a)
+        m.addAction(self.a_customise)
+        self._check_style_actions()
 
         m = mb.addMenu("&Define")
         for a in (self.a_proj, self.a_analysis, self.a_mats, None):
@@ -1087,7 +1145,7 @@ class MainWindow(QMainWindow):
         if self.path is None or self.path.suffix.lower() != FILE_EXT:
             return self.save_as()
         try:
-            save_project(self.project, self.path)
+            self._write_project(self.path)
         except OSError as e:
             QMessageBox.critical(self, "Save failed", str(e))
             return False
@@ -1095,17 +1153,148 @@ class MainWindow(QMainWindow):
         self.add_recent(str(self.path))
         self.refresh_all()
         self.statusBar().showMessage(f"Saved {self.path}", 3000)
+        self.cloud_backup(self.path)
         return True
+
+    def _write_project(self, path):
+        """Save to ``path``; keep the previous version as .bak when that is switched on."""
+        path = Path(path)
+        if path.exists() and _setting_on(self.settings, "files/keep_bak", True):
+            try:
+                import shutil
+                shutil.copyfile(path, path.with_name(path.name + ".bak"))
+            except OSError:
+                pass
+        save_project(self.project, path)          # written to a .tmp file first, then renamed
 
     def save_as(self) -> bool:
         default = str(Path(self.last_dir()) / ((self.project.title or "project").replace("/", "-") + FILE_EXT))
-        path, _ = QFileDialog.getSaveFileName(self, "Save Project As", default, f"{APP_NAME} project (*{FILE_EXT})")
+        filters = (f"{APP_NAME} project (*{FILE_EXT});;GeoStudio project (*.gsz);;PDF (all analyses) (*.pdf)")
+        path, flt = QFileDialog.getSaveFileName(self, "Save Project As", default, filters)
         if not path:
             return False
-        if not path.lower().endswith(FILE_EXT):
+        low = path.lower()
+        if "gsz" in flt and not low.endswith(".gsz"):
+            path += ".gsz"
+        elif "PDF" in flt and not low.endswith(".pdf"):
+            path += ".pdf"
+        elif not (low.endswith(FILE_EXT) or low.endswith(".gsz") or low.endswith(".pdf")):
             path += FILE_EXT
+        if path.lower().endswith(".gsz"):
+            return self.export_gsz(path)
+        if path.lower().endswith(".pdf"):
+            return self.export_pdf_all(path)
         self.path = Path(path)
         return self.save()
+
+    # -- autosave and cloud backup ---------------------------------------------
+    def setup_autosave(self):
+        on = _setting_on(self.settings, "files/autosave", True)
+        minutes = max(1, int(self.settings.value("files/autosave_min", 2) or 2))
+        self.autosave_timer.stop()
+        if on:
+            self.autosave_timer.start(minutes * 60 * 1000)
+        return on
+
+    def autosave(self):
+        """Save the open project without asking. Projects without a file go to the autosave folder."""
+        if not self.dirty or self.worker is not None or self.pages.currentWidget() is self.home:
+            return None
+        from .. import backup
+        into_file = _setting_on(self.settings, "files/autosave_into_file", True)
+        try:
+            if self.path is not None and self.path.suffix.lower() == FILE_EXT and into_file:
+                self._write_project(self.path)
+                self.dirty = False
+                self.refresh_all()
+                target = self.path
+            else:
+                target = backup.autosave_path(self.path.stem if self.path else self.project.title)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                save_project(self.project, target)
+        except OSError as e:
+            self.log_msg(f"Autosave failed: {e}")
+            return None
+        self.statusBar().showMessage(f"Autosaved {target.name}", 3000)
+        self.cloud_backup(target, stem=self.path.stem if self.path else None)
+        return target
+
+    def cloud_backup(self, src, stem=None, force=False, folder=None, keep=None):
+        """Copy a saved project into the cloud drive folder. Returns the copy, or None."""
+        import time
+
+        from .. import backup
+        if not force and not _setting_on(self.settings, "backup/enabled", False):
+            return None
+        folder = folder or (self.settings.value("backup/folder", "") or "")
+        if not folder or not Path(folder).is_dir():
+            if force:
+                raise OSError(f"The backup folder does not exist: {folder or '(none chosen)'}")
+            self.log_msg("Cloud backup skipped: choose the Google Drive / OneDrive folder in "
+                         "Edit > Preferences > Files & Backup.")
+            return None
+        every = int(self.settings.value("backup/every_min", 10) or 0)
+        if not force and every and time.time() - self._last_backup < every * 60:
+            return None
+        keep = int(self.settings.value("backup/keep", 20) or 0) if keep is None else keep
+        try:
+            dst = backup.backup_copy(src, folder, stem=stem or Path(src).stem.replace(" (autosave)", ""),
+                                     keep=keep)
+        except OSError as e:
+            if force:
+                raise
+            self.log_msg(f"Cloud backup failed: {e}")
+            return None
+        self._last_backup = time.time()
+        self.log_msg(f"Backed up to {dst}")
+        return dst
+
+    def backup_now(self, folder=None, keep=None) -> str:
+        """Save (if needed) and copy the project to the backup folder now. Returns a message."""
+        from .. import backup
+        if self.path is not None and self.path.suffix.lower() == FILE_EXT:
+            if self.dirty:
+                self._write_project(self.path)
+                self.dirty = False
+                self.refresh_all()
+            src, stem = self.path, self.path.stem
+        else:
+            src = backup.autosave_path(self.project.title)
+            src.parent.mkdir(parents=True, exist_ok=True)
+            save_project(self.project, src)
+            stem = None
+        try:
+            dst = self.cloud_backup(src, stem=stem, force=True, folder=folder, keep=keep)
+        except OSError as e:
+            return f"Backup failed: {e}"
+        return f"Backed up to {dst}"
+
+    def backup_now_action(self):
+        msg = self.backup_now()
+        if msg.startswith("Backup failed"):
+            QMessageBox.warning(self, APP_NAME, msg + "\n\nChoose the folder in Edit > Preferences > "
+                                "Files & Backup.")
+            self.preferences("files")
+        else:
+            self.statusBar().showMessage(msg, 5000)
+
+    def recover_autosave(self):
+        from .. import backup
+        d = backup.autosave_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        path, _ = QFileDialog.getOpenFileName(self, "Recover Autosaved Project", str(d),
+                                              f"{APP_NAME} project (*{FILE_EXT} *.bak)")
+        if not path:
+            return
+        if not self.maybe_save():
+            return
+        try:
+            p = load_project(path)
+        except Exception as e:                     # noqa: BLE001
+            QMessageBox.critical(self, "Open failed", str(e))
+            return
+        self.set_project(p, None, dirty=True)      # Save asks where to keep it
+        self.log_msg(f"Recovered {path}. Save it to keep it.")
 
     def last_dir(self):
         return self.settings.value("files/last_dir", str(Path.home()))
@@ -1186,23 +1375,56 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Export failed", str(e))
 
-    def export_gsz(self):
-        path = self._ask_save("Export GeoStudio Project", ".gsz", "GeoStudio project (*.gsz)")
+    def export_gsz(self, path=None):
         if not path:
-            return
+            path = self._ask_save("Save As GeoStudio Project", ".gsz", "GeoStudio project (*.gsz)")
+        if not path:
+            return False
         try:
             from ..gsz import write_gsz
             skipped = write_gsz(self.project, path)
         except Exception as e:
             QMessageBox.critical(self, "Export failed", str(e))
-            return
-        self.log_msg(f"Exported GeoStudio file: {path}")
+            return False
+        self.add_recent(path)
+        self.log_msg(f"Saved GeoStudio file: {path}")
         msg = ("Exported geometry, materials, in situ and consolidation stress analyses and their fixed, load "
                "and drainage boundaries.")
         if skipped:
             msg += "\n\nNot written (set these up in GeoStudio):\n- " + "\n- ".join(skipped)
             self.log_msg("Not written to .gsz: " + "; ".join(skipped))
-        QMessageBox.information(self, APP_NAME, msg)
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            QMessageBox.information(self, APP_NAME, msg)
+        return True
+
+    def export_pdf_all(self, path=None, analyses=None):
+        if not path:
+            path = self._ask_save("Export as PDF", ".pdf", "PDF (*.pdf)")
+        if not path:
+            return False
+        from .pdf import export_pdf_all
+        try:
+            n = export_pdf_all(path, self.project, self.opts, analyses)
+        except Exception as e:                     # noqa: BLE001
+            QMessageBox.critical(self, "Export failed", str(e))
+            return False
+        self.log_msg(f"Exported PDF ({n} analyses): {path}")
+        return True
+
+    def export_pdf_dialog(self):
+        """Export as PDF: the current view, every analysis, or the design report."""
+        items = ["Current analysis (drawing and report)", "All analyses (one section each)",
+                 "Design report (Word-style, with the code check)"]
+        item, ok = QInputDialog.getItem(self, "Export as PDF", "What to put in the PDF:", items, 1, False)
+        if not ok:
+            return
+        k = items.index(item)
+        if k == 0:
+            self.export_pdf()
+        elif k == 1:
+            self.export_pdf_all()
+        else:
+            self.design_report()
 
     def export_json(self):
         path = self._ask_save("Export Project JSON", ".json", "JSON (*.json)")
@@ -1862,6 +2084,8 @@ class MainWindow(QMainWindow):
             act.setIcon(_tool_icon(name))
         self.home.set_dark(dark)
         self.canvas.update()
+        if hasattr(self, "a_steps") and self.stepbar.isVisible():
+            self.stepbar.update_steps(self.project, self.current_analysis())
 
     def set_theme(self, mode):
         self.settings.setValue("ui/theme", mode)
@@ -1872,13 +2096,43 @@ class MainWindow(QMainWindow):
     def preferences(self, tab="appearance"):
         from .prefs import PreferencesDialog
         d = PreferencesDialog(self.settings, self, tab)
+        d.on_apply = self.apply_preferences
+        d.on_backup_now = lambda folder, keep: self.backup_now(folder, keep)
         if d.exec() != QDialog.Accepted:
             return
+        self.apply_preferences(d)
+
+    def apply_preferences(self, d):
         d.save()
+        from . import appearance
+        appearance.load(self.settings)
         self.set_theme(d.theme())
+        self._check_style_actions()
         for win in [self] + _EXTRA_WINDOWS:
             win.chat.refresh_settings()
             win.chat.set_enabled(d.enabled.isChecked())
+            win.setup_autosave()
+
+    def set_ui_style(self, style=None, scheme=None):
+        """Switch the interface style or colour scheme from the View menu."""
+        from . import appearance
+        cfg = appearance.config()
+        if style:
+            cfg.style = style
+        if scheme:
+            cfg.scheme = scheme
+            cfg.accent = ""
+        appearance.save(self.settings, cfg)
+        theme_manager().refresh()
+        self._check_style_actions()
+
+    def _check_style_actions(self):
+        from . import appearance
+        cfg = appearance.config()
+        if cfg.style in getattr(self, "a_style", {}):
+            self.a_style[cfg.style].setChecked(True)
+        if cfg.scheme in getattr(self, "a_scheme", {}):
+            self.a_scheme[cfg.scheme].setChecked(True)
 
     def open_in_new_window(self, project):
         win = MainWindow()

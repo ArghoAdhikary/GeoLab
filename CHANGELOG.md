@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.11.0 - 2026-11-08
+
+### Looks
+
+- **Interface styles:** Classic, Modern (rounded), Compact, Flat and Large / touch.
+- **Colour schemes:** GeoLab blue, Ocean, Forest, Sunset, Purple, Graphite, Solarized and High contrast,
+  each with a day and a night version, plus your own accent colour.
+- Both are in the View menu and in Edit > Preferences > Appearance, with an interface font and size.
+- **Advanced Colours & Fonts:** a background colour, a text colour and a font for every part of the
+  window: title bar (Windows 11), menu bar, menus, toolbars, panel title bars, tabs, status bar,
+  tooltips, step guide, the chat head and every part of the chat box, and the drawing area.
+- **Add Font:** add .ttf / .otf fonts (for example Bangla fonts). Themes can be saved to and loaded from
+  a .geolab-theme file.
+
+### Files
+
+- **Autosave, on by default:** every 2 minutes, into the project file (the previous version kept as .bak),
+  or to a recovery copy for new projects. File > Recover Autosaved Project opens those.
+- **Cloud backup:** dated copies to Google Drive, OneDrive, Dropbox or iCloud Drive (the synced folder is
+  found automatically), with the number of versions to keep.
+- **Save As GeoStudio (.gsz)** in the File menu, and .gsz and PDF as file types in Save As.
+- **Export as PDF:** the current analysis, every analysis in one PDF, or the design report.
+
 ## 2.10.0 - 2026-11-07
 
 ### Design codes

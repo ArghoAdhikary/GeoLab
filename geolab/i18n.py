@@ -100,6 +100,21 @@ BN = {
     "Switch to Results to see the factor of safety, contours and graphs. View > Report gives "
     "everything as text.":
         "নিরাপত্তা গুণক, কনট্যুর ও গ্রাফ দেখতে ফলাফলে যান। দেখুন > রিপোর্ট সবকিছু লেখা আকারে দেয়।",
+    # 2.11: appearance, autosave, backup
+    "Save As GeoStudio (.gsz)": "GeoStudio (.gsz) হিসেবে সংরক্ষণ", "Export as PDF": "PDF হিসেবে এক্সপোর্ট",
+    "Recover Autosaved Project": "অটোসেভ করা প্রজেক্ট ফেরত আনুন",
+    "Back Up to Cloud Drive Now": "এখনই ক্লাউড ড্রাইভে ব্যাকআপ",
+    "Interface Style": "ইন্টারফেসের ধরন", "Colour Scheme": "রঙের স্কিম",
+    "Customise Colours and Fonts": "রং ও ফন্ট নিজের মতো করুন",
+    "Appearance": "চেহারা", "Advanced Colours & Fonts": "উন্নত রং ও ফন্ট", "Files & Backup": "ফাইল ও ব্যাকআপ",
+    "AI Assistant": "AI সহকারী", "Autosave": "অটোসেভ", "Add Font...": "ফন্ট যোগ করুন...",
+    "Save Theme...": "থিম সংরক্ষণ...", "Load Theme...": "থিম খুলুন...", "Reset All": "সব আগের মতো",
+    "Reset": "আগের মতো", "Back Up Now": "এখনই ব্যাকআপ", "Open Backup Folder": "ব্যাকআপ ফোল্ডার খুলুন",
+    "Interface style and colours": "ইন্টারফেসের ধরন ও রং", "Interface style": "ইন্টারফেসের ধরন",
+    "Colour scheme": "রঙের স্কিম", "Accent colour": "প্রধান রং", "Interface font": "ইন্টারফেসের ফন্ট",
+    "Your fonts": "আপনার ফন্ট", "Language": "ভাষা",
+    "Save my work automatically (on by default)": "আমার কাজ নিজে থেকে সংরক্ষণ করুন (শুরু থেকেই চালু)",
+    "Back up a dated copy of the project to a cloud drive": "প্রজেক্টের তারিখসহ কপি ক্লাউড ড্রাইভে রাখুন",
 }
 
 _lang = "en"

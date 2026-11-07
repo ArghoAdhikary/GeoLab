@@ -42,12 +42,17 @@ class ThemeManager(QObject):
                 except AttributeError:
                     pass
                 self._hooked = True
-            app.setPalette(dark_palette() if dark else light_palette())
+            from . import appearance
+            appearance.apply(app, dark)
         changed = dark != self.dark
         self.dark = dark
         if changed or mode is not None:
             self.changed.emit(dark)
         return dark
+
+    def refresh(self):
+        """Re-apply the appearance (after the style, colours or fonts change)."""
+        return self.apply(self.mode)
 
     def _system_changed(self, *_):
         if self.mode == "auto":

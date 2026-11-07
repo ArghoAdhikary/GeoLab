@@ -286,7 +286,7 @@ def test_preferences_save_provider_and_toggle_chat(win, app, monkeypatch):
     from PySide6.QtWidgets import QDialog
     from geolab.ui import prefs
     d = prefs.PreferencesDialog(win.settings, win, "ai")
-    assert d.tabs.currentIndex() == 1
+    assert d.tabs.tabText(d.tabs.currentIndex()) == "AI Assistant"
     d.provider.setCurrentIndex(d.provider.findData("compatible"))
     d.preset.activated.emit(d.preset.findText("Ollama (on this computer)"))
     assert d.base.text() == "http://localhost:11434/v1"

@@ -105,7 +105,9 @@ class StepBar(QFrame):
             b.setCursor(Qt.PointingHandCursor)
             b.setToolTip(hint)
             if i == nxt:
-                style = f"background:{ACCENT}; color:white; font-weight:bold; border:0;"
+                from . import appearance
+                style = (f"background:{appearance.color('stepbar', 'fg', appearance.accent())}; color:white; "
+                         "font-weight:bold; border:0;")
             elif done:
                 style = ("background:#1f3d2a; color:#9be2b0;" if dark else "background:#e3f4e8; color:#1e6b3a;") + " border:0;"
             else:
@@ -117,8 +119,10 @@ class StepBar(QFrame):
         key, title, done, hint = steps[nxt]
         self.hint.setText(f"<b>{tr('Next')}: {title}.</b> {hint}" if not all(s[2] for s in steps[:-1])
                           or nxt < len(steps) - 1 else f"<b>{tr('Done')}.</b> {steps[-1][3]}")
+        from . import appearance
+        line, bg = ("#313b47", "#1b2129") if dark else ("#d6dce4", "#fafbfd")
         self.setStyleSheet("#stepbar { border-bottom: 1px solid %s; background: %s; }"
-                           % (("#313b47", "#1b2129") if dark else ("#d6dce4", "#fafbfd")))
+                           % (line, appearance.color("stepbar", "bg", bg)))
 
 
 class QuickSlopeDialog(QDialog):

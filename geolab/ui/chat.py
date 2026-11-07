@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QDockWidget, QFrame, QGraphicsDropShadowEffect, Q
 
 from ..ai import AIError
 from ..assistant import PROVIDERS, Assistant, Settings, describe_project
+from . import appearance
 from .theme import is_dark, manager
 
 ACCENT = "#2f6fe0"
@@ -27,7 +28,11 @@ GREETING = ("Hi! I am the GeoLab Assistant. Ask me to build a slope (\"10 m high
             "or explain a result.")
 
 
-def bubble_icon(size=26, color="white") -> QPixmap:
+def accent() -> str:
+    return appearance.accent()
+
+
+def bubble_icon(size=26, color="white", dots=None) -> QPixmap:
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
     g = QPainter(pm)
@@ -43,7 +48,7 @@ def bubble_icon(size=26, color="white") -> QPixmap:
     tail.lineTo(s * 0.48, s * 0.70)
     tail.closeSubpath()
     g.drawPath(path.united(tail))
-    g.setBrush(QColor(ACCENT))
+    g.setBrush(QColor(dots or accent()))
     for k in range(3):
         g.drawEllipse(QPointF(s * (0.32 + 0.18 * k), s * 0.43), s * 0.055, s * 0.055)
     g.end()
@@ -71,11 +76,13 @@ class ChatHead(QWidget):
     def paintEvent(self, e):
         g = QPainter(self)
         g.setRenderHint(QPainter.Antialiasing)
-        c = QColor(ACCENT).lighter(112) if self._hover else QColor(ACCENT)
+        base = QColor(appearance.color("chat_head", "bg", accent()))
+        c = base.lighter(112) if self._hover else base
         g.setPen(Qt.NoPen)
         g.setBrush(c)
         g.drawEllipse(QRectF(4, 4, HEAD_SIZE, HEAD_SIZE))
-        g.drawPixmap(int(4 + (HEAD_SIZE - 28) / 2), int(4 + (HEAD_SIZE - 28) / 2 + 1), self._icon)
+        icon = bubble_icon(28, appearance.color("chat_head", "fg", "#ffffff"), dots=base.name())
+        g.drawPixmap(int(4 + (HEAD_SIZE - 28) / 2), int(4 + (HEAD_SIZE - 28) / 2 + 1), icon)
         if self.unread:
             g.setBrush(QColor("#e53935"))
             g.setPen(QPen(QColor("white"), 2))
@@ -203,32 +210,53 @@ class ChatPanel(QWidget):
     # -- looks ---------------------------------------------------------------
     def restyle(self):
         dark = is_dark()
+        A = appearance
         c = {"bg": "#1e1f22" if dark else "#ffffff", "head": "#2b2d30" if dark else "#f3f5f9",
              "line": "#3a3d42" if dark else "#dde1e8", "sub": "#9a9ea6" if dark else "#6b7280",
              "text": "#e6e6e6" if dark else "#1a1a1a"}
+        bg = A.color("chat_box", "bg", c["bg"])
+        text = A.color("chat_box", "fg", c["text"])
+        head = A.color("chat_header", "bg", c["head"])
+        head_text = A.color("chat_header", "fg", c["text"])
+        field = QColor(bg).darker(104).name() if QColor(bg).lightness() > 128 else QColor(bg).lighter(130).name()
+        send_bg = A.color("chat_send", "bg", accent())
+        send_fg = A.color("chat_send", "fg", "#ffffff")
+        hfont = A.font_css_for(A.config().fonts["chat_header"]) if "chat_header" in A.config().fonts else ""
+        bfont = A.font_css_for(A.config().fonts["chat_box"]) if "chat_box" in A.config().fonts else ""
+        self.title.setStyleSheet(f"color: {head_text}; background: transparent; {hfont}")
         self.setStyleSheet(f"""
-            QWidget#chatpanel {{ background: {c['bg']}; }}
+            QWidget#chatpanel {{ background: {bg}; }}
             QLabel#chatsub {{ background: transparent; }}
-            QFrame#chatheader {{ background: {c['head']}; border-bottom: 1px solid {c['line']}; }}
+            QFrame#chatheader {{ background: {head}; border-bottom: 1px solid {c['line']}; }}
             QLabel#chatsub {{ color: {c['sub']}; font-size: 8.5pt; }}
-            QToolButton#chatbtn {{ font-size: 12pt; padding: 2px 6px; color: {c['text']}; }}
-            QTextBrowser {{ background: {c['bg']}; color: {c['text']}; }}
-            QFrame#chatinput {{ background: {c['bg']}; border-top: 1px solid {c['line']}; }}
-            QPlainTextEdit {{ background: {c['head']}; color: {c['text']}; border: 1px solid {c['line']};
-                              border-radius: 8px; padding: 4px; }}
-            QPushButton#chatsend {{ background: {ACCENT}; color: white; border: none; border-radius: 8px;
+            QToolButton#chatbtn {{ font-size: 12pt; padding: 2px 6px; color: {head_text}; }}
+            QTextBrowser {{ background: {bg}; color: {text}; }}
+            QFrame#chatinput {{ background: {bg}; border-top: 1px solid {c['line']}; }}
+            QPlainTextEdit {{ background: {field}; color: {text}; border: 1px solid {c['line']};
+                              border-radius: 8px; padding: 4px; {bfont} }}
+            QPushButton#chatsend {{ background: {send_bg}; color: {send_fg}; border: none; border-radius: 8px;
                                     padding: 8px 14px; font-weight: 600; }}
-            QPushButton#chatsend:disabled {{ background: #7f9fd9; }}
+            QPushButton#chatsend:disabled {{ background: {QColor(send_bg).lighter(140).name()}; }}
         """)
         self.render()
 
     def render(self):
         dark = is_dark()
-        col = {"user": ("#2f6fe0", "#ffffff"),
-               "assistant": ("#2f3237", "#e9e9e9") if dark else ("#eef1f6", "#1a1a1a"),
+        A = appearance
+        ai = ("#2f3237", "#e9e9e9") if dark else ("#eef1f6", "#1a1a1a")
+        col = {"user": (A.color("chat_user", "bg", accent()), A.color("chat_user", "fg", "#ffffff")),
+               "assistant": (A.color("chat_ai", "bg", ai[0]), A.color("chat_ai", "fg", ai[1])),
                "note": ("#203a2a", "#a8e0b8") if dark else ("#e9f7ee", "#1d5b32"),
                "error": ("#4a2323", "#ffb4b4") if dark else ("#fdecec", "#8a1c1c")}
-        parts = ["<div style='font-family:Segoe UI, sans-serif; font-size:10pt'>"]
+        family, size = "Segoe UI, sans-serif", "10pt"
+        f = A.config().fonts.get("chat_box")
+        if f:
+            qf = QFont()
+            qf.fromString(f)
+            family = f"'{qf.family()}', sans-serif"
+            if qf.pointSizeF() > 0:
+                size = f"{qf.pointSizeF():g}pt"
+        parts = [f"<div style=\"font-family:{family}; font-size:{size}\">"]
         msgs = self.messages or [("assistant", GREETING)]
         for role, text in msgs:
             bg, fg = col.get(role, col["assistant"])
@@ -271,7 +299,7 @@ class _Popup(QFrame):
 
     def restyle(self):
         line = "#3a3d42" if is_dark() else "#cfd5df"
-        bg = "#1e1f22" if is_dark() else "#ffffff"
+        bg = appearance.color("chat_box", "bg", "#1e1f22" if is_dark() else "#ffffff")
         self.setStyleSheet(f"QFrame#chatpopup {{ background: {bg}; border: 1px solid {line}; border-radius: 10px; }}")
 
 

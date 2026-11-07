@@ -11,8 +11,10 @@ from ..report import build_report
 from .render import Renderer, View, project_bounds
 
 
-def paint_pages(device, project, analysis, mode, opts, new_page):
-    g = QPainter(device)
+def paint_pages(device, project, analysis, mode, opts, new_page, painter=None, first_page=1):
+    """Draw the drawing page and the report pages of one analysis. Returns the next page number."""
+    g = painter or QPainter(device)
+    page_no = first_page
     try:
         dpi = device.resolution() if hasattr(device, "resolution") else 150
         page = QRectF(0, 0, device.width(), device.height())
@@ -52,10 +54,12 @@ def paint_pages(device, project, analysis, mode, opts, new_page):
         g.setPen(QColor("#666"))
         g.drawText(QRectF(page.left(), page.bottom() - 18 * pt, page.width(), 18 * pt), Qt.AlignLeft | Qt.AlignVCenter,
                    f"{APP_NAME} {__version__}")
-        g.drawText(QRectF(page.left(), page.bottom() - 18 * pt, page.width(), 18 * pt), Qt.AlignRight | Qt.AlignVCenter, "Page 1")
+        g.drawText(QRectF(page.left(), page.bottom() - 18 * pt, page.width(), 18 * pt), Qt.AlignRight | Qt.AlignVCenter,
+                   f"Page {page_no}")
+        page_no += 1
         # --- report pages -------------------------------------------------
         if analysis is None:
-            return
+            return page_no
         lines = build_report(project, analysis).splitlines()
         mono = QFont("Consolas")
         mono.setStyleHint(QFont.Monospace)
@@ -63,7 +67,9 @@ def paint_pages(device, project, analysis, mode, opts, new_page):
         line_h = 10 * pt
         per_page = int((page.height() - 40 * pt) / line_h)
         pages = [lines[i:i + per_page] for i in range(0, len(lines), per_page)]
-        for k, chunk in enumerate(pages, start=2):
+        for chunk in pages:
+            k = page_no
+            page_no += 1
             new_page()
             g.setFont(mono)
             g.setPen(QColor("#111"))
@@ -74,8 +80,37 @@ def paint_pages(device, project, analysis, mode, opts, new_page):
             g.setPen(QColor("#666"))
             g.drawText(QRectF(page.left(), page.bottom() - 18 * pt, page.width(), 18 * pt),
                        Qt.AlignRight | Qt.AlignVCenter, f"Page {k}")
+        return page_no
+    finally:
+        if painter is None:
+            g.end()
+
+
+def _writer(path, project):
+    w = QPdfWriter(str(path))
+    w.setResolution(150)
+    w.setPageLayout(QPageLayout(QPageSize(QPageSize.A4), QPageLayout.Landscape, QMarginsF(12, 12, 12, 12),
+                                QPageLayout.Millimeter))
+    w.setTitle(project.title)
+    w.setCreator(f"{APP_NAME} {__version__}")
+    return w
+
+
+def export_pdf_all(path, project, opts=None, analyses=None):
+    """One PDF with the drawing and the report of every analysis (solved ones show their results)."""
+    w = _writer(path, project)
+    items = list(analyses if analyses is not None else project.analyses) or [None]
+    g = QPainter(w)
+    try:
+        page = 1
+        for i, a in enumerate(items):
+            if i:
+                w.newPage()
+            mode = "results" if (a is not None and a.results) else "define"
+            page = paint_pages(w, project, a, mode, opts, w.newPage, painter=g, first_page=page)
     finally:
         g.end()
+    return len(items)
 
 
 def export_pdf(path, project, analysis, mode="results", opts=None):
