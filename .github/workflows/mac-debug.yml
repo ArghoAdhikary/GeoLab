@@ -18,9 +18,14 @@ jobs:
         run: |
           curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/main/install-mac.sh" -o install-mac.sh
           GEOLAB_TAG="${{ inputs.tag }}" GEOLAB_NO_OPEN=1 bash install-mac.sh
-          ls -d /Applications/GeoLab.app ~/Applications/GeoLab.app 2>/dev/null
-          file /Applications/GeoLab.app/Contents/MacOS/GeoLab || file ~/Applications/GeoLab.app/Contents/MacOS/GeoLab
-          open -a GeoLab && sleep 20 && pgrep -fl GeoLab
+          APP=/Applications/GeoLab.app; [ -d "$APP" ] || APP="$HOME/Applications/GeoLab.app"
+          file "$APP/Contents/MacOS/GeoLab"
+          # opened the way a user does (Finder / open), with the Gatekeeper checks
+          open "$APP"
+          for i in $(seq 1 60); do pgrep -f "GeoLab.app/Contents/MacOS/GeoLab" && break; sleep 1; done
+          pgrep -fl "GeoLab.app/Contents/MacOS/GeoLab"
+          sleep 10
+          pgrep -f "GeoLab.app/Contents/MacOS/GeoLab" > /dev/null && echo "GeoLab is running"
       - name: Download and launch the released app
         if: false
         env:
