@@ -20,6 +20,8 @@ _mkl = None              # the mkl_rt library (thread control)
 # Below this many unknowns MKL runs on one thread: starting threads costs more than it saves, and idle
 # MKL threads that keep spinning slow down NumPy's own work on the element matrices.
 PARALLEL_FROM = 30000
+# Most cores the solver may use on large systems (0 = all); Edit > Preferences > Advanced
+MAX_THREADS = 0
 
 
 def _bundled_mkl_rt():
@@ -80,7 +82,7 @@ class _threads:
     """Run MKL on one thread for small systems, on all cores for large ones."""
 
     def __init__(self, n):
-        self.n = 1 if n < PARALLEL_FROM else 0
+        self.n = 1 if n < PARALLEL_FROM else MAX_THREADS
         self.prev = None
 
     def __enter__(self):

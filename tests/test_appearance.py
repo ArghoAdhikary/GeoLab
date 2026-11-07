@@ -136,7 +136,7 @@ def test_preferences_dialog_round_trip(win, app):
     from geolab.ui import appearance as ap
     from geolab.ui.prefs import PreferencesDialog
     d = PreferencesDialog(win.settings, win, "advanced")
-    assert d.tabs.count() == 4 and d.tabs.currentIndex() == 1
+    assert d.tabs.count() == 6 and d.tabs.currentIndex() == 1
     assert len(d.color_btns) >= 30 and "chat_box" in d.font_btns and "menubar" in d.font_btns
     d.style_box.setCurrentIndex(d.style_box.findData("modern"))
     d.scheme_box.setCurrentIndex(d.scheme_box.findData("sunset"))

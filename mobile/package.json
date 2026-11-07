@@ -1,6 +1,6 @@
 {
   "name": "geolab-mobile",
-  "version": "2.12.0",
+  "version": "2.13.0",
   "private": true,
   "description": "GeoLab Mobile: the GeoLab analysis engine (Python via Pyodide) in a phone app",
   "scripts": {

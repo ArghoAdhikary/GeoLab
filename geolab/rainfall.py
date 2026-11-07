@@ -44,6 +44,9 @@ def fetch_open_meteo(lat: float, lon: float, start: str, end: str, timeout: floa
                                 "end_date": end, "daily": "precipitation_sum,et0_fao_evapotranspiration",
                                 "timezone": "auto"})
     req = urllib.request.Request(f"{ARCHIVE}?{q}", headers={"User-Agent": "GeoLab"})
+    if opener is None:
+        from .net import check
+        check("Getting rain data")
     try:
         with (opener or urllib.request.urlopen)(req, timeout=timeout) as r:
             data = json.loads(r.read().decode("utf-8"))

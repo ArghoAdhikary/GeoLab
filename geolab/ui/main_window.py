@@ -108,7 +108,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._icon_actions = []    # (action, tool icon name), redrawn when the theme changes
         self.settings = _app_settings()
-        self.project: Project = new_project()
+        from .prefs2 import apply_runtime
+        apply_runtime(self.settings)
+        self.project: Project = new_project(self._default_units())
         self.path: Path | None = None
         self.dirty = False
         self.undo_stack: list[dict] = []
@@ -454,6 +456,18 @@ class MainWindow(QMainWindow):
         self.a_open_tab = A("Open in New Ta&b...", self.open_in_tab, "Ctrl+Alt+O")
         self.a_close_tab = A("&Close Tab", lambda: self.close_tab(self.tabbar.currentIndex()), "Ctrl+W")
         self.a_update = A("Check for &Updates...", lambda: self.check_updates(quiet=False))
+        # 2.13
+        self.a_seismic = A("&Earthquake Check (ky and Newmark)...", lambda: self.tool3("seismic"),
+                           tip="Yield acceleration and permanent displacement without a dynamic analysis")
+        self.a_param = A("Parametric &Study...", lambda: self.tool3("param"),
+                         tip="Vary one or two values over a range and plot F")
+        self.a_piles = A("&Pile Design...", lambda: self.tool3("pile"),
+                         tip="Axial capacity of a single pile, pile groups and settlement")
+        self.a_nails = A("Soil &Nails, Anchors and Geosynthetics...", lambda: self.tool3("nail"))
+        self.a_excav = A("&Braced Excavation...", lambda: self.tool3("excavation"),
+                         tip="Apparent earth pressure, strut loads and basal heave")
+        self.a_xlsx = A("Export Results to &Excel...", lambda: self.tool3("excel"))
+        self.a_tpl_save = A("Save as My &Template...", lambda: self.tool3("template"))
         self.a_share = A("S&hare Report (HTML to Cloud Drive)...", self.share_report)
 
     def _build_menus(self):
@@ -463,6 +477,8 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_quick)
         m.addAction(self.a_riverbank)
         m.addAction(self.a_levee)
+        self.template_menu = m.addMenu("New from My Te&mplate")
+        self.template_menu.aboutToShow.connect(lambda: self.tool3("template_menu"))
         nm = m.addMenu("New by &Analysis Type")
         for a in self.a_new_kind.values():
             nm.addAction(a)
@@ -482,13 +498,15 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_save_pdf)
         m.addAction(self.a_recover)
         m.addAction(self.a_versions)
+        m.addAction(self.a_tpl_save)
         m.addAction(self.a_backup)
         m.addAction(self.a_share)
         m.addSeparator()
         m.addAction(self.a_import)
         m.addAction(self.a_dxf_in)
         exp = m.addMenu("E&xport")
-        for a in (self.a_pdf, self.a_save_pdf, self.a_png, self.a_csv, self.a_json, self.a_gsz, self.a_dxf_out):
+        for a in (self.a_pdf, self.a_save_pdf, self.a_png, self.a_csv, self.a_xlsx, self.a_json, self.a_gsz,
+                  self.a_dxf_out):
             exp.addAction(a)
         m.addAction(self.a_print)
         m.addSeparator()
@@ -554,8 +572,9 @@ class MainWindow(QMainWindow):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("Desi&gn")
-        for a in (self.a_code, self.a_optimizer, self.a_whatif, self.a_prob, None, self.a_backcalc, self.a_liq,
-                  None, self.a_found, None, self.a_qty, self.a_compare, None, self.a_dreport):
+        for a in (self.a_code, self.a_optimizer, self.a_whatif, self.a_prob, self.a_param, None, self.a_backcalc,
+                  self.a_liq, self.a_seismic, None, self.a_found, self.a_piles, self.a_nails, self.a_excav, None,
+                  self.a_qty, self.a_compare, None, self.a_dreport):
             m.addSeparator() if a is None else m.addAction(a)
 
         m = mb.addMenu("&Tools")
@@ -1192,10 +1211,14 @@ class MainWindow(QMainWindow):
         if ok:
             self.new_file(list(ANALYSIS_KINDS)[labels.index(item)])
 
+    def _default_units(self):
+        u = self.settings.value("new/units", "metric") or "metric"
+        return u if u in ("metric", "imperial") else "metric"
+
     def new_file(self, kind="slope", units=None):
         if not self.maybe_save():
             return
-        self.set_project(new_project(units or self.project.units, kind))
+        self.set_project(new_project(units or self._default_units(), kind))
         self.set_draw_mode("region")
         self.draw_actions["region"].setChecked(True)
 
@@ -1651,6 +1674,8 @@ class MainWindow(QMainWindow):
         self.before_change()
         n = len(self.project.analyses) + 1
         a = self.project.add_analysis(f"{KIND_SHORT[kind]} {n}", kind)
+        from ..usertemplates import apply_quality
+        apply_quality(a, self.settings.value("solver/quality", "normal") or "normal")
         if parent:
             a.parent_id = parent.id
             a.name = f"{KIND_SHORT[kind]} ({parent.name})"
@@ -2187,6 +2212,9 @@ class MainWindow(QMainWindow):
 
     def apply_preferences(self, d):
         d.save()
+        from .prefs2 import apply_runtime
+        apply_runtime(self.settings)
+        self.canvas.update()
         from . import appearance
         appearance.load(self.settings)
         self.set_theme(d.theme())
@@ -2383,6 +2411,24 @@ class MainWindow(QMainWindow):
                "found": tools2.FoundationDialog, "lab": tools2.LabTestDialog, "swcc": tools2.SwccDialog,
                "qty": tools2.QuantitiesDialog, "compare": tools2.CompareDialog}[name]
         d = cls(self)
+        if run:
+            d.exec()
+        return d
+
+    def tool3(self, name, run=True, tab=None):
+        from . import tools, tools3
+        if name == "excel":
+            return tools3.export_excel(self)
+        if name == "template":
+            return tools3.save_template(self)
+        if name == "template_menu":
+            return tools3.fill_template_menu(self, self.template_menu)
+        if name in ("seismic", "param"):
+            if not tools._need(self, "a solved slope stability analysis", tools.slope_analyses(self.project, True)):
+                return None
+            d = (tools3.SeismicDialog if name == "seismic" else tools3.ParametricDialog)(self)
+        else:
+            d = tools3.DesignToolsDialog(self, tab or name)
         if run:
             d.exec()
         return d

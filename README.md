@@ -29,6 +29,15 @@
   (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, seepage (SEEP/W) and stress / consolidation analyses and their boundaries).
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
 
+### More design and settings (2.13)
+
+- Earthquake check: ky and Newmark displacement without a dynamic analysis.
+- Parametric study of one or two values.
+- Pile design, soil nail walls, ground anchors, geosynthetics and braced excavations.
+- Excel export, your own templates, and company branding on reports (in English or Bangla).
+- Satellite, topographic and hillshade maps.
+- Offline mode, interface size, colour-blind-safe contours, and solver accuracy and cores.
+
 ### From the field to the design (2.12)
 
 - Cross-section from a map (ground levels from the Copernicus DEM).

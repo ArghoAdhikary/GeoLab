@@ -106,6 +106,18 @@ directly with another vendor's software.
 | Example files: every example solved and saved as .slab (Help > Example Files Folder, GeoLab-examples.zip) | files written and read back (`test_help.py`) |
 | Intel MKL PARDISO sparse direct solver on Windows for systems above 30 000 unknowns; SciPy SuperLU below that, on macOS and on phones | same solution to round-off (residual ~1e-15); full test suite passes with MKL loaded; factorisation 5-8 times faster at 50 000-200 000 unknowns |
 
+### Added in 2.13 (more design and settings)
+
+| Feature | Verified by |
+|---|---|
+| Yield acceleration ky and Newmark displacement (Jibson 2007, Ambraseys and Menu 1988) | F = 1.00 at ky on the layered example; regression values by hand (`test_v213.py`) |
+| Parametric study (one or two values) | a higher water table lowers F; crossing interpolation; Excel and CSV tables |
+| Pile capacity, groups, settlement | bored pile in clay equals 0.45 Su and 9 Su by hand; group efficiency and block failure |
+| Soil nail wall, ground anchor, geosynthetics | apparent pressure, bond length and T_al by hand; values put into the model |
+| Braced excavation | strut loads add up to the pressure diagram; Peck envelopes; basal heave |
+| Excel export | workbook opened as a zip; sheet names cleaned and unique |
+| Offline mode, templates, solver presets, CPU cores, palettes, report branding and Bangla | driven through the preferences dialog and the menus (`test_v213.py`) |
+
 ### Added in 2.12 (field to design)
 
 | Feature | Verified by |

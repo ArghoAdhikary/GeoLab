@@ -128,6 +128,9 @@ def generate_project(prompt: str, api_key: str | None = None, client=None) -> tu
         raise AIError("Describe the slope you want to model.")
     import anthropic
     if client is None:
+        from .net import OFFLINE
+        if OFFLINE:
+            raise AIError("GeoLab is in offline mode (Edit > Preferences > Advanced).")
         client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
     try:
         resp = client.beta.messages.create(
@@ -182,6 +185,9 @@ def generate_from_image(image: bytes, media_type: str, note: str = "", api_key: 
         raise AIError("The picture is larger than 5 MB. Make it smaller and try again.")
     import anthropic
     if client is None:
+        from .net import OFFLINE
+        if OFFLINE:
+            raise AIError("GeoLab is in offline mode (Edit > Preferences > Advanced).")
         client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
     content = [{"type": "image", "source": {"type": "base64", "media_type": media_type,
                                             "data": base64.b64encode(image).decode("ascii")}},

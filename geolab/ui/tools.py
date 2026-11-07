@@ -1287,7 +1287,7 @@ def write_pdf(blocks, path, title=""):
 
     from .. import designreport
     doc = QTextDocument()
-    doc.setDefaultStyleSheet("body{font-family:'Segoe UI','Helvetica Neue','Nirmala UI',Arial;font-size:9.5pt}"
+    doc.setDefaultStyleSheet("body{font-family:'Segoe UI','Helvetica Neue','Nirmala UI','Kohinoor Bangla','Bangla Sangam MN',Arial;font-size:9.5pt}"
                              "h1{color:#1d4e89;font-size:18pt}h2{color:#1d4e89;font-size:13pt}h3{font-size:11pt}"
                              "th{background:#e8eef6}td,th{padding:3px}pre{font-family:Consolas;font-size:7.5pt}")
     imgs = []

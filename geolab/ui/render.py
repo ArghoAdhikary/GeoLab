@@ -102,14 +102,34 @@ class View:
         self.cy += dpy / self.s
 
 
+# contour colours (Edit > Preferences > Advanced): the classic rainbow, or colour-blind-safe scales
+PALETTES = {
+    "classic": ("Classic (blue - green - red)", [(0.0, (45, 85, 200)), (0.25, (40, 170, 220)), (0.5, (80, 190, 90)),
+                                                (0.75, (240, 210, 50)), (1.0, (215, 50, 40))]),
+    "viridis": ("Viridis (colour-blind safe)", [(0.0, (68, 1, 84)), (0.25, (59, 82, 139)), (0.5, (33, 145, 140)),
+                                               (0.75, (94, 201, 98)), (1.0, (253, 231, 37))]),
+    "cividis": ("Cividis (colour-blind safe)", [(0.0, (0, 34, 78)), (0.25, (62, 74, 107)), (0.5, (124, 123, 120)),
+                                               (0.75, (188, 175, 111)), (1.0, (254, 232, 56))]),
+    "blue_orange": ("Blue - orange (colour-blind safe)", [(0.0, (33, 102, 172)), (0.25, (103, 169, 207)),
+                                                          (0.5, (247, 247, 247)), (0.75, (244, 165, 130)),
+                                                          (1.0, (178, 24, 43))]),
+    "grey": ("Greyscale (for printing)", [(0.0, (30, 30, 30)), (1.0, (235, 235, 235))]),
+}
+PALETTE = "classic"
+
+
+def set_palette(name: str):
+    global PALETTE
+    PALETTE = name if name in PALETTES else "classic"
+
+
 def colormap(t: float) -> QColor:
-    """Blue -> cyan -> green -> yellow -> red."""
-    t = min(1.0, max(0.0, t))
-    stops = [(0.0, (45, 85, 200)), (0.25, (40, 170, 220)), (0.5, (80, 190, 90)), (0.75, (240, 210, 50)), (1.0, (215, 50, 40))]
+    t = min(1.0, max(0.0, t)) if t == t else 0.0
+    stops = PALETTES.get(PALETTE, PALETTES["classic"])[1]
     for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
         if t <= t1:
-            u = (t - t0) / (t1 - t0)
-            return QColor(*[int(a + u * (b - a)) for a, b in zip(c0, c1)])
+            u = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
+            return QColor(*(int(a + (b - a) * u) for a, b in zip(c0, c1)))
     return QColor(*stops[-1][1])
 
 

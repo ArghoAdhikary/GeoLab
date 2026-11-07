@@ -86,6 +86,9 @@ def make_icon():
 def run_gui(argv) -> int:
     from PySide6.QtWidgets import QApplication
     from . import APP_NAME
+    from .ui.main_window import _app_settings as _settings
+    from .ui.prefs2 import scale_env
+    scale_env(_settings())
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("GeoLab")

@@ -44,6 +44,9 @@ def fetch_elevations(points, timeout: float = 30.0, opener=None) -> list[float]:
         q = urllib.parse.urlencode({"latitude": ",".join(f"{p[0]:.5f}" for p in chunk),
                                     "longitude": ",".join(f"{p[1]:.5f}" for p in chunk)})
         req = urllib.request.Request(f"{ELEVATION}?{q}", headers={"User-Agent": "GeoLab"})
+        if opener is None:
+            from .net import check
+            check("Getting ground levels")
         try:
             with (opener or urllib.request.urlopen)(req, timeout=timeout) as r:
                 data = json.loads(r.read().decode("utf-8"))

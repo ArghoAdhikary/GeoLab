@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geolab"
-version = "2.12.0"
+version = "2.13.0"
 description = "2D geotechnical analysis: slope stability, seepage, stress-deformation, consolidation, earthquake, heat transfer, contaminant transport and air flow"
 readme = "README.md"
 license = { text = "MIT" }

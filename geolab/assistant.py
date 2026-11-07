@@ -341,6 +341,10 @@ def _call_claude(s: Settings, system: str, messages: list[dict]) -> str:
     key = s.api_key.strip() or os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
         raise AIError("Add your Anthropic API key in Settings > AI Assistant.")
+    from .net import OFFLINE
+    if OFFLINE:
+        raise AIError("GeoLab is in offline mode (Edit > Preferences > Advanced): the online assistant is off. "
+                      "A local model (Ollama) still works.")
     client = anthropic.Anthropic(api_key=key, timeout=s.timeout)
     try:
         resp = client.beta.messages.create(
@@ -401,6 +405,9 @@ def _post_json(url, body, key, timeout):
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
                                  headers={"Content-Type": "application/json",
                                           **({"Authorization": f"Bearer {key}"} if key else {})})
+    from .net import OFFLINE
+    if OFFLINE and not any(h in url for h in ("localhost", "127.0.0.1", "[::1]")):
+        raise AIError("GeoLab is in offline mode (Edit > Preferences > Advanced): only a local model works.")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))

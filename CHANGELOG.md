@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.13.0 - 2026-11-08
+
+### Design
+
+- **Earthquake check:** the yield acceleration ky of a solved slope, and the Newmark displacement from
+  Jibson (2007) and Ambraseys and Menu (1988), with a hazard class. No dynamic analysis is needed.
+- **Parametric study:** vary one or two values (water table, kh, loads, strength, any material property),
+  plot F and find where it crosses 1.0 and the target. The table saves to Excel or CSV.
+- **Pile design:** driven and bored piles in clay and sand (API alpha, beta method, API limits), pile
+  groups (Converse-Labarre, block failure) and settlement.
+- **Soil nails, ground anchors and geosynthetics:** nail wall design (apparent pressure, tension,
+  pullout, active zone, length), anchor bond and tendon checks, and a library of generic geogrids and
+  geotextiles with their reduction factors. Each design can be put into the model's reinforcement.
+- **Braced excavations:** Peck apparent pressure for sand and soft or stiff clay, strut loads by the hinge
+  method, and basal heave (Bjerrum and Eide).
+
+### Files and reports
+
+- **Export Results to Excel** (.xlsx): project, materials, results, design check and critical slices.
+- **My templates:** save a project as a template and start new projects from it.
+- **Report branding:** company, engineer, licence, checked by, address, header, footer and logo on
+  every design report.
+- **Design report in Bangla.** Decimal places can be set.
+- **Map:** satellite, topographic and hillshade layers as well as the street map.
+
+### Settings
+
+- **Offline mode:** one switch turns off every internet call.
+- **Accessibility:** interface size from 100 to 200 %, and colour-blind-safe and greyscale contour colours.
+- **Solver:** Fast / Normal / Fine accuracy for new analyses, and how many CPU cores to use.
+- Units of new projects.
+- More of the desktop app in Bangla: the new dialogs and the preferences.
+
 ## 2.12.0 - 2026-11-08
 
 ### From the site

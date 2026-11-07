@@ -42,6 +42,9 @@ def fetch_forecast(lat, lon, past_days=14, forecast_days=7, timeout=30.0, opener
                                 "past_days": int(past_days), "forecast_days": int(forecast_days),
                                 "timezone": "auto"})
     req = urllib.request.Request(f"{FORECAST}?{q}", headers={"User-Agent": "GeoLab"})
+    if opener is None:
+        from .net import check
+        check("The forecast")
     try:
         with (opener or urllib.request.urlopen)(req, timeout=timeout) as r:
             data = json.loads(r.read().decode("utf-8"))

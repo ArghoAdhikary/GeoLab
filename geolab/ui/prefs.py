@@ -161,7 +161,11 @@ class PreferencesDialog(QDialog):
         self.tabs.addTab(self._advanced(), "Advanced Colours && Fonts")
         self.tabs.addTab(self._files(), "Files && Backup")
         self.tabs.addTab(self._ai(), "AI Assistant")
-        self.tabs.setCurrentIndex({"appearance": 0, "advanced": 1, "files": 2, "ai": 3}.get(tab, 0))
+        from . import prefs2
+        self.tabs.addTab(prefs2.reports_tab(self), "Reports && Units")
+        self.tabs.addTab(prefs2.advanced_tab(self), "Advanced")
+        self.tabs.setCurrentIndex({"appearance": 0, "advanced": 1, "files": 2, "ai": 3, "reports": 4,
+                                   "system": 5}.get(tab, 0))
         self.resize(740, 640)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.Apply)
         bb.accepted.connect(self.accept)
@@ -686,6 +690,8 @@ class PreferencesDialog(QDialog):
                     qs.remove(f"ai/key/{p}")
         if self.keys.get("claude"):
             qs.setValue("ai/api_key", self.keys["claude"])   # shared with the AI Slope Builder
+        from . import prefs2
+        prefs2.save(self)
 
     def done(self, r):
         if self.worker is not None:

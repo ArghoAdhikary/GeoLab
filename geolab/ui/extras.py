@@ -516,6 +516,9 @@ def parse_version(v: str):
 
 def check_update(current: str, opener=None, timeout=8.0) -> dict | None:
     """The latest release if it is newer than ``current``: {"version", "url", "assets": {name: url}}."""
+    if opener is None:
+        from ..net import check
+        check("The update check")
     req = urllib.request.Request(RELEASES, headers={"User-Agent": "GeoLab", "Accept": "application/vnd.github+json"})
     with (opener or urllib.request.urlopen)(req, timeout=timeout) as r:
         data = json.loads(r.read().decode("utf-8"))

@@ -286,6 +286,29 @@ class MapWidget(QWidget):
     picked = Signal(int, float, float)     # 0 = A, 1 = B
 
     TILE = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    # layer -> (label, tile address, attribution, highest zoom)
+    LAYERS = {
+        "osm": ("Street map", "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "© OpenStreetMap contributors", 18),
+        "satellite": ("Satellite", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                      "Imagery © Esri, Maxar, Earthstar Geographics", 18),
+        "topo": ("Topographic (contours)", "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+                 "© OpenTopoMap (CC-BY-SA), © OpenStreetMap contributors", 17),
+        "hillshade": ("Hillshade (terrain relief)",
+                      "https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}",
+                      "Hillshade © Esri", 16),
+    }
+    layer = "osm"
+    ATTRIB = "© OpenStreetMap contributors"
+
+    def set_layer(self, key):
+        if key not in self.LAYERS:
+            return
+        self.layer = key
+        _, self.TILE, self.ATTRIB, zmax = self.LAYERS[key]
+        self.zoom = min(self.zoom, zmax)
+        self.tiles.clear()
+        self.pending.clear()
+        self.update()
 
     def __init__(self, lat=22.36, lon=91.80, zoom=12, parent=None):
         super().__init__(parent)
@@ -329,6 +352,9 @@ class MapWidget(QWidget):
         from PySide6.QtNetwork import QNetworkRequest
         key = (z, x, y)
         if key in self.pending or key in self.tiles:
+            return
+        from .. import net
+        if net.OFFLINE:
             return
         self.pending.add(key)
         req = QNetworkRequest(QUrl(self.TILE.format(z=z, x=x, y=y)))
@@ -388,9 +414,12 @@ class MapWidget(QWidget):
             g.drawLine(pts[0], pts[1])
         g.setPen(QColor("#333"))
         g.setFont(ui_font(7.5))
-        g.fillRect(QRectF(self.width() - 170, self.height() - 16, 170, 16), QColor(255, 255, 255, 200))
-        g.drawText(QRectF(self.width() - 168, self.height() - 16, 166, 16), Qt.AlignRight | Qt.AlignVCenter,
-                   "© OpenStreetMap contributors")
+        from .. import net
+        text = "Offline mode: no map" if net.OFFLINE else self.ATTRIB
+        tw = g.fontMetrics().horizontalAdvance(text) + 10
+        g.fillRect(QRectF(self.width() - tw, self.height() - 16, tw, 16), QColor(255, 255, 255, 200))
+        g.drawText(QRectF(self.width() - tw + 2, self.height() - 16, tw - 4, 16), Qt.AlignRight | Qt.AlignVCenter,
+                   text)
         g.end()
 
     def mousePressEvent(self, e):
@@ -423,7 +452,7 @@ class MapWidget(QWidget):
 
     def wheelEvent(self, e):
         z = self.zoom + (1 if e.angleDelta().y() > 0 else -1)
-        self.zoom = max(3, min(18, z))
+        self.zoom = max(3, min(self.LAYERS[self.layer][3], z))
         self.update()
 
 
@@ -455,6 +484,11 @@ class MapSectionDialog(QDialog):
             self.place.addItem(name, (la, lo))
         self.place.currentIndexChanged.connect(lambda *_: self.map.set_center(*self.place.currentData(), zoom=13))
         f.addRow("Go to", self.place)
+        self.layer = QComboBox()
+        for k, (lab, *_r) in MapWidget.LAYERS.items():
+            self.layer.addItem(lab, k)
+        self.layer.currentIndexChanged.connect(lambda *_: self.map.set_layer(self.layer.currentData()))
+        f.addRow("Map", self.layer)
         self.a_lat, self.a_lon, self.b_lat, self.b_lon = (QLineEdit() for _ in range(4))
         for w_ in (self.a_lat, self.a_lon, self.b_lat, self.b_lon):
             w_.setPlaceholderText("decimal degrees")
