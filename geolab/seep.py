@@ -177,7 +177,8 @@ class _SeepProblem(DiffusionProblem):
         self.w = {}                             # nodal weight of each material in the lumped storage
         for m in self.mat_list:
             e = self.emask[m.id]
-            a = np.bincount(mesh.tris[e].ravel(), weights=np.repeat(mesh.A[e] / 3.0, 3), minlength=mesh.nn)
+            Aw = getattr(mesh, "Aw", mesh.A)          # axisymmetric: area x radius
+            a = np.bincount(mesh.tris[e].ravel(), weights=np.repeat(Aw[e] / 3.0, 3), minlength=mesh.nn)
             self.w[m.id] = a / mesh.lump
         self.y = mesh.nodes[:, 1]
         self.gw = project.gamma_w
@@ -318,7 +319,11 @@ def run_seepage(project, analysis, progress=None, cancel=None, parent_results=No
     if not project.bcs("hydraulic", analysis):
         raise ValueError("No boundary conditions are defined. Draw at least one head boundary condition.")
     nodes, tris, tmat = generate_mesh(project, analysis.mesh_size)
-    mesh = T3(nodes, tris, tmat)
+    if getattr(analysis, "axisymmetric", False):
+        from .seep3d import T3Axi
+        mesh = T3Axi(nodes, tris, tmat)
+    else:
+        mesh = T3(nodes, tris, tmat)
     prob = _SeepProblem(project, analysis, mesh)
     steps = time_steps(analysis.duration, analysis.n_steps, analysis.step_growth) if analysis.transient else None
     h0 = _initial_head(project, analysis, mesh, parent_results)

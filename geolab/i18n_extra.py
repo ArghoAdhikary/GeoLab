@@ -97,3 +97,13 @@ BN_213 = {
     "Get Ground Levels": "ভূমির উচ্চতা আনুন", "Use for Material": "উপাদানে ব্যবহার", "Language": "ভাষা",
     "Earthquake Check": "ভূমিকম্প যাচাই", "Pile capacity": "পাইলের ক্ষমতা",
 }
+
+
+BN_214 = {
+    "&3D View...": "&৩ডি ভিউ...", "3D &Section (z)...": "৩ডি &সেকশন (z)...", "3D View": "৩ডি ভিউ",
+    "3D / Axisymmetric": "৩ডি / অক্ষ-প্রতিসম", "3D": "৩ডি", "3D wells": "৩ডি কূপ",
+    "Factor of safety, 3D": "নিরাপত্তা গুণক, ৩ডি", "Factor of safety, 2D section": "নিরাপত্তা গুণক, ২ডি সেকশন",
+    "Liquefied area": "তরলীভূত এলাকা", "Largest excess pore pressure ratio": "সর্বোচ্চ অতিরিক্ত ছিদ্রচাপ অনুপাত",
+    "Width of the model in z": "z দিকে মডেলের প্রস্থ", "3D Section": "৩ডি সেকশন",
+    "Interface (thin layer that slips: adhesion and friction angle)": "ইন্টারফেস (পাতলা স্তর যা পিছলায়)",
+}

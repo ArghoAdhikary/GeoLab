@@ -146,6 +146,11 @@ class _Model:
         self.sphi, self.cphi = np.sin(np.radians(phi)), np.cos(np.radians(phi))
         self.spsi, self.cpsi = np.sin(np.radians(psi)), np.cos(np.radians(psi))
         self.D = np.stack([elastic_D(e, n) for e, n in zip(self.E, self.nu)])
+        from .interface import InterfaceSet
+        self.ifc = InterfaceSet(project, mesh, srf)
+        self.iface = self.ifc.mask & self.active
+        for e, De in self.ifc.D(self.nu).items():
+            self.D[e] = De
         self.D[~self.active] *= 1e-6                 # excluded regions: nearly void
         self.gamma[~self.active] = 0.0
         sp2 = self.sphi ** 2
@@ -247,7 +252,13 @@ def _increment(sysm: _System, sig0, F_inc, uc_inc, plastic_iter=500, tol=1e-4):
     mesh, mod = sysm.mesh, sysm.model
     evp = np.zeros_like(sig0)
     du_old = None
-    pl = mod.plastic[:, None]
+    iface = getattr(mod, "iface", np.zeros(mod.plastic.shape, bool))
+    pl = (mod.plastic | iface)[:, None]
+    ifc = getattr(mod, "ifc", None)
+    if iface.any():
+        from .interface import flow_vector, yield_value
+        im = iface
+        dt_i = 0.5 / ifc.Gs[im]
     for it in range(1, plastic_iter + 1):
         bdy = np.einsum("egji,ejk,egk,eg->ei", mesh.B, mod.D, evp, mesh.dV)
         du = sysm.solve(F_inc + mesh.vector(bdy), uc_inc)
@@ -258,11 +269,17 @@ def _increment(sysm: _System, sig0, F_inc, uc_inc, plastic_iter=500, tol=1e-4):
             return du, sig, True, it
         du_old = du
         f = mc_function(sig, mod.c_gp, mod.sphi[:, None], mod.cphi[:, None])
-        f = np.where(pl & (f > 0), f, 0.0)
+        f = np.where(mod.plastic[:, None] & (f > 0), f, 0.0)
         if np.any(f > 0):
             sc = np.maximum(np.abs(sig).max(axis=-1), mod.c_gp + 1.0)
             dq = mc_gradient(sig, mod.c_gp, mod.spsi[:, None], mod.cpsi[:, None], sc)
             evp = evp + (mod.dt * f)[..., None] * dq
+        if iface.any():
+            cs, sn = ifc.cs[im][:, None], ifc.sn[im][:, None]
+            fi, tau = yield_value(sig[im], cs, sn, ifc.c[im][:, None], ifc.tand[im][:, None])
+            fi = np.maximum(fi, 0.0)
+            if np.any(fi > 0):
+                evp[im] = evp[im] + (dt_i[:, None] * fi)[..., None] * flow_vector(tau, cs, sn)
     return du, sig, False, plastic_iter
 
 
@@ -397,7 +414,7 @@ def run_stress(project, analysis, progress=None, cancel=None, parent=None, seep_
     F_total = F_total + structs.released + structs.prestress
     sig_start = sig.copy()
     staged = bool(model.inactive.any()) or bool(structs.items)
-    steps = max(1, int(analysis.load_steps)) if model.plastic.any() or analysis.stress_type == "load" else 1
+    steps = max(1, int(analysis.load_steps)) if model.plastic.any() or model.iface.any() or analysis.stress_type == "load" else 1
     from .soilmodels import NONLINEAR_MODELS, Constitutive, solve_nonlinear
     mats_ = {m.id: m for m in project.materials}
     nonlinear = analysis.stress_type == "load" and any(

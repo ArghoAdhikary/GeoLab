@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.14.0 - 2026-11-09
+
+### New analyses (as in GeoStudio SLOPE3D, SEEP3D, QUAKE/W and SIGMA/W)
+
+- **3D slope stability:** ellipsoidal slip surfaces on the section extruded over a width, 3D Bishop
+  simplified (Hungr 1987), trial slide lengths, a slide centre, and crest loads over part of the width.
+  Pore pressure from a piezometric line, or from a 2D or 3D seepage analysis.
+- **3D seepage:** the mesh extruded into wedge elements, steady or transient, saturated / unsaturated.
+  Boundary conditions can act over part of the width. Wells can have a fixed head or a pumping rate.
+- **Axisymmetric seepage:** flow to wells, tanks and shafts. Checked against Thiem's equation.
+- **Liquefaction in dynamic analysis:** excess pore pressure from the cyclic stresses (cycle counting,
+  Seed et al. 1976 ru curve), liquefied zones, and the shear modulus softening with ru.
+- **Stability after an earthquake:** a slope child of a dynamic analysis can add its excess pore
+  pressure.
+- **Interface elements:** a thin layer with shear and normal stiffness that slips on adhesion and
+  friction angle, for walls, piles and weak seams.
+
+### Viewing
+
+- **View > 3D View:** the extruded model, the 3D slip surface, the water table across the width and the
+  wells, turned with the mouse.
+- **View > 3D Section (z):** show any section of a 3D seepage analysis.
+- The design report gives the 3D factor of safety, the well flows and the liquefied area.
+
 ## 2.13.0 - 2026-11-08
 
 ### Design

@@ -29,6 +29,14 @@
   (geometry, materials, limit-equilibrium slope analyses with their water table and entry/exit, seepage (SEEP/W) and stress / consolidation analyses and their boundaries).
 - PDF reports, PNG/CSV/JSON exports and a command-line batch solver.
 
+### 3D, liquefaction and interfaces (2.14)
+
+- 3D slope stability (ellipsoids, 3D Bishop) on an extruded section, with loads over part of the width.
+- 3D seepage with wells, and axisymmetric seepage.
+- Excess pore pressure and liquefaction in dynamic analysis, and stability after the earthquake.
+- Interface elements that slip between structures and soil.
+- A 3D view of the model.
+
 ### More design and settings (2.13)
 
 - Earthquake check: ky and Newmark displacement without a dynamic analysis.

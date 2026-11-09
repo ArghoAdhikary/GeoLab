@@ -106,6 +106,17 @@ directly with another vendor's software.
 | Example files: every example solved and saved as .slab (Help > Example Files Folder, GeoLab-examples.zip) | files written and read back (`test_help.py`) |
 | Intel MKL PARDISO sparse direct solver on Windows for systems above 30 000 unknowns; SciPy SuperLU below that, on macOS and on phones | same solution to round-off (residual ~1e-15); full test suite passes with MKL loaded; factorisation 5-8 times faster at 50 000-200 000 unknowns |
 
+### Added in 2.14 (3D, axisymmetric, liquefaction, interfaces)
+
+| Feature | Verified by |
+|---|---|
+| 3D slope stability: ellipsoids on an extruded section, 3D Bishop simplified (Hungr 1987), trial lengths, loads over part of the width | a very long ellipsoid equals 2D Bishop (1e-6); F falls towards the 2D value as the slide gets longer; a partly loaded slide lies between unloaded and fully loaded (`test_v214.py`) |
+| 3D seepage (wedge elements, steady / transient, unsaturated), boundaries over part of the width, wells (head or rate) | extruded earth dam equals the 2D heads (1e-6) and width x 2D flow; pumped flow balances exactly; drawdown largest at the well |
+| Axisymmetric seepage | Thiem's equation for confined flow to a well (1.5 %) and its head at r = 5 m |
+| Pore pressure generation and liquefaction in dynamic analysis (cycle counting, Seed et al. 1976) | 15 uniform cycles at CSR = CRR15 give D = 1 (4 %); a lower CRR liquefies more; post-earthquake F lower than static |
+| Interface elements (shear / normal stiffness, adhesion, friction, no dilation) | shear box slip = tau / ks (3 %); slides beyond c + sigma tan delta; exact return to the slip limit |
+| 3D View and 3D sections | drawn and switched in the app (`test_v214.py`) |
+
 ### Added in 2.13 (more design and settings)
 
 | Feature | Verified by |
@@ -167,10 +178,10 @@ can be edited. The project specification and the standards themselves govern.
 
 | Feature | Notes |
 |---|---|
-| 3D geometry and 3D analyses | 2D only. |
+| 3D terrain and layers that change along z; 3D stress-deformation | 3D slope and seepage use one section extruded over a width. |
 | Snow, density-dependent flow, freezing-induced water migration | Climate covers rainfall, evaporation, plant transpiration, ponding and runoff. |
-| Hardening Soil cap (volumetric hardening), hysteretic cyclic models, liquefaction / pore pressure generation in dynamic analysis | Static models: linear, Mohr-Coulomb, Modified Cam Clay, hyperbolic, Hardening Soil (shear hardening). |
-| Interface elements between structures and soil; structural yield | Structures are tied to the soil nodes and stay elastic. |
+| Hardening Soil cap (volumetric hardening), hysteretic cyclic models, effective-stress cyclic constitutive models | Dynamic pore pressure comes from cycle counting (Seed et al. 1976), not a constitutive model. |
+| Zero-thickness interfaces; structural yield | Interfaces are thin layers of elements; structures stay elastic. |
 | Cam Clay / hyperbolic / Hardening Soil in the in situ and consolidation stages | Those stages use E and nu (Mohr-Coulomb plasticity is included); the nonlinear models apply in load-deformation stages. |
 | Thermal, transport and air-flow values in unit conversion | Listed after converting so they can be checked. |
 | `.gsz`: dynamic, thermal, transport and air analyses on export; structures, construction stages and rapid drawdown settings; results | Written as a list of skipped items when exporting. Results are not read. |

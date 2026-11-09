@@ -100,6 +100,11 @@ def key_results(project, a) -> list[list[str]]:
     if a.kind == "slope":
         c = r.get("critical")
         if c:
+            t3 = r.get("three_d") or {}
+            if "fos" in t3:
+                rows.append(["Factor of safety, 3D", f"{t3['fos']:.3f} ({t3['method']}; slide length "
+                                                     f"{t3['length']:.1f} {u('length')})"])
+                rows.append(["Factor of safety, 2D section", f"{t3['fos_2d']:.3f} (Bishop simplified)"])
             rows.append(["Factor of safety", f"{c['fos']:.3f} ({SLOPE_METHODS.get(a.method, a.method)})"])
             for m, v in c.get("all_methods", {}).items():
                 if v.get("fos") is not None and m != a.method:
@@ -119,10 +124,16 @@ def key_results(project, a) -> list[list[str]]:
         else:
             rows.append(["Result", r.get("message", "no valid slip surface")])
     elif a.kind == "seepage":
-        rows.append(["Inflow", f"{_f(r.get('inflow'))} {u('flux')} per unit width"])
+        per = " (3D model)" if r.get("three_d") else " (full circle)" if r.get("axisymmetric") else " per unit width"
+        rows.append(["Inflow", f"{_f(r.get('inflow'))} {u('flux')}{per}"])
+        for w in (r.get("three_d") or {}).get("wells", []):
+            rows.append([f"Well {w['well']}", f"flow {_f(w['flow'])} {u('flux')}"])
         rows.append(["Outflow", f"{_f(r.get('outflow'))} {u('flux')}"])
         for k, v in (r.get("flux_sections") or {}).items():
             rows.append([f"Flux section '{k}'", f"{_f(v if not isinstance(v, dict) else v.get('total'))}"])
+    elif a.kind == "dynamic" and "ru" in r:
+        rows.append(["Largest excess pore pressure ratio", f"{r['max_ru']:.2f}"])
+        rows.append(["Liquefied area", f"{r['liquefied_area']:.1f} {u('length')}² ({sum(r['liquefied'])} elements)"])
     elif a.kind == "stress":
         if r.get("dx") is not None:
             d = np.hypot(np.asarray(r["dx"]), np.asarray(r["dy"]))

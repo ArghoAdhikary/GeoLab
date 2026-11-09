@@ -81,6 +81,7 @@ STRESS_MODELS = {
     "cam_clay": "Modified Cam Clay (critical state)",
     "hyperbolic": "Hyperbolic (Duncan-Chang)",
     "hardening_soil": "Hardening Soil (stress-dependent stiffness)",
+    "interface": "Interface (thin layer that slips: adhesion and friction angle)",
     "none": "None (excluded)",
 }
 
@@ -232,6 +233,15 @@ class Material:
     half_life: float = 0.0        # 0 = no decay
     # -- air flow --
     k_air: float = 1e-5           # air conductivity of dry soil
+    # -- pore pressure generation in dynamic analysis (cyclic loading) --
+    liq_crr: float = 0.0          # cyclic resistance ratio for 15 uniform cycles (0 = no pore pressure)
+    liq_b: float = 0.34           # slope of the CRR vs number of cycles curve, CRR ~ N^-b
+    liq_alpha: float = 0.7        # shape of the ru vs N / NL curve (Seed et al. 1976)
+    # -- interface (thin layer between a structure and the soil) --
+    iface_ks: float = 1e4         # shear stiffness (pressure per length of slip)
+    iface_kn: float = 1e6         # normal stiffness (pressure per length of closure)
+    iface_c: float = 0.0          # adhesion
+    iface_delta: float = 20.0     # interface friction angle (degrees)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Material":
@@ -280,6 +290,8 @@ class BoundaryCondition:
     value3: float = 0.0                              # climate: potential transpiration of plants (per unit area)
     fn3: list = field(default_factory=list)          # [[time, value3], ...]
     root_depth: float = 0.0                          # climate: depth of the root zone (0 = no plants)
+    z1: float = 0.0                                  # 3D: out-of-plane extent of the boundary
+    z2: float = 0.0                                  # (z1 = z2 = 0: the whole width)
 
     @property
     def kind(self) -> str:
@@ -466,6 +478,19 @@ class Analysis:
     particles: list = field(default_factory=list)   # [[x, y], ...] for particle tracking
     # staged construction: regions not present in this stage (excavated or not yet built)
     inactive_regions: list = field(default_factory=list)
+    # 3D (slope and seepage): the section is extruded over a width in z
+    three_d: bool = False
+    width3d: float = 40.0
+    n_layers3d: int = 12                # seepage: element layers across the width
+    slide_lengths: list = field(default_factory=list)   # slope: trial slide lengths (empty = automatic)
+    slide_center_z: float = -1.0        # slope: z of the slide centre (negative = middle of the width)
+    load_z1: float = 0.0                # slope: surcharges and point loads act from z1 to z2
+    load_z2: float = 0.0                # (both 0: over the whole width)
+    wells: list = field(default_factory=list)   # seepage 3D: [[x, z, y_top, y_bottom, "head"|"flow", value]]
+    slice_z: float = -1.0               # 3D seepage: section shown in the results (negative = middle)
+    axisymmetric: bool = False          # seepage: x is the radius, the model turns about x = 0
+    pwp_generation: bool = False        # dynamic: excess pore pressure and liquefaction
+    post_earthquake: bool = False       # slope: add the excess pore pressure of the parent dynamic analysis
     results: dict | None = None
 
     @classmethod

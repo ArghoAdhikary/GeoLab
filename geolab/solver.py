@@ -44,7 +44,14 @@ def solve(project, analysis, progress=None, cancel=None) -> dict:
     seep = ancestor(project, analysis, "seepage")
     if kind == "seepage":
         pres = parent.results if parent is not None and parent.kind == "seepage" else None
-        res = run_seepage(project, analysis, progress, cancel, parent_results=pres)
+        if getattr(analysis, "three_d", False):
+            from .seep3d import run_seepage3d
+            res = run_seepage3d(project, analysis, progress, cancel, parent_results=pres)
+        elif getattr(analysis, "axisymmetric", False):
+            from .seep3d import run_axisymmetric
+            res = run_axisymmetric(project, analysis, progress, cancel, parent_results=pres)
+        else:
+            res = run_seepage(project, analysis, progress, cancel, parent_results=pres)
     elif kind == "slope":
         from .slope import run_slope
         if analysis.pwp == "seepage" and seep is None:
@@ -53,9 +60,21 @@ def solve(project, analysis, progress=None, cancel=None) -> dict:
         stress = ancestor(project, analysis, "stress")
         if analysis.method == "finite_element" and stress is None:
             raise ValueError("The finite element stress method needs a stress-deformation analysis as parent.")
-        res = run_slope(project, analysis, _ensure(project, seep, cancel) if analysis.pwp == "seepage" else None,
-                        progress, cancel, stress_results=_ensure(project, stress, cancel) if stress else None)
         dyn = ancestor(project, analysis, "dynamic")
+        excess = None
+        if getattr(analysis, "post_earthquake", False):
+            dres = _ensure(project, dyn, cancel) if dyn is not None else None
+            if not dres or "excess_pwp" not in dres:
+                raise ValueError("Post-earthquake stability needs a parent dynamic analysis solved with pore "
+                                 "pressure generation.")
+            from .slope import excess_pwp_fn
+            excess = excess_pwp_fn(dres)
+        run = run_slope
+        if getattr(analysis, "three_d", False):
+            from .slope3d import run_slope3d as run
+        res = run(project, analysis, _ensure(project, seep, cancel) if analysis.pwp == "seepage" else None,
+                  progress, cancel, stress_results=_ensure(project, stress, cancel) if stress else None,
+                  excess_fn=excess)
         if dyn is not None and res.get("critical"):
             res["newmark"] = newmark_for_slope(project, analysis, res, _ensure(project, dyn, cancel), seep)
     elif kind == "stress":

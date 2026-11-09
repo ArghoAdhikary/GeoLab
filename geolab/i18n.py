@@ -137,6 +137,9 @@ from .i18n_extra import BN_213 as _BN_213  # noqa: E402
 
 for _k, _v in _BN_213.items():
     BN.setdefault(_k, _v)
+from .i18n_extra import BN_214 as _BN_214  # noqa: E402
+for _k, _v in _BN_214.items():
+    BN.setdefault(_k, _v)
 
 
 def set_language(code: str):

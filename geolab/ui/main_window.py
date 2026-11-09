@@ -469,6 +469,10 @@ class MainWindow(QMainWindow):
         self.a_xlsx = A("Export Results to &Excel...", lambda: self.tool3("excel"))
         self.a_tpl_save = A("Save as My &Template...", lambda: self.tool3("template"))
         self.a_share = A("S&hare Report (HTML to Cloud Drive)...", self.share_report)
+        # 2.14
+        self.a_view3d = A("&3D View...", self.show_3d, tip="The extruded model, the 3D slip surface and wells")
+        self.a_section3d = A("3D &Section (z)...", self.choose_section,
+                             tip="Show another section across the width of a 3D seepage analysis")
 
     def _build_menus(self):
         mb = self.menuBar()
@@ -527,6 +531,8 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_report)
         m.addAction(self.a_slices)
         m.addAction(self.a_graph)
+        m.addAction(self.a_view3d)
+        m.addAction(self.a_section3d)
         m.addSeparator()
         m.addAction(self.a_steps)
         tm = m.addMenu("&Theme")
@@ -960,8 +966,19 @@ class MainWindow(QMainWindow):
             html.append("<i>Not solved. Press F5 to solve.</i>")
         elif r["type"] == "slope":
             c = r.get("critical")
+            t3 = r.get("three_d") or {}
+            if c and "fos" in t3:
+                html.append(f"<span style='font-size:16pt'><b>F (3D) = {t3['fos']:.3f}</b></span><br>"
+                            f"{t3['method']}<br>Slide length {t3['length']:.1f} {p.unit('length')}, centre z = "
+                            f"{t3['zc']:.1f}, volume {t3['volume']:.0f} {p.unit('length')}³<br>"
+                            f"2D section (Bishop): F = {t3['fos_2d']:.3f}<br>F (3D) by slide length: " +
+                            ", ".join(f"{L:g}: {'-' if F is None else f'{F:.3f}'}" for L, F in t3["by_length"]) +
+                            "<br>View > 3D View shows the slip surface.<br><br>2D results of the section:<br>")
+            elif c and t3.get("error"):
+                html.append(f"<span style='color:#a00'>3D: {t3['error']}</span><br>")
             if c:
-                html.append(f"<span style='font-size:16pt'><b>F = {c['fos']:.3f}</b></span><br>")
+                html.append(f"<span style='font-size:{'11' if 'fos' in t3 else '16'}pt'><b>F = {c['fos']:.3f}</b>"
+                            f"</span><br>")
                 dd = r.get("drawdown")
                 if dd:
                     html.append(f"Rapid drawdown to {dd['level']:g} {p.unit('length')}:<br>"
@@ -992,6 +1009,15 @@ class MainWindow(QMainWindow):
         u = p.unit
         h = [f"Converged: {'yes' if r.get('converged', True) else '<b>no</b>'}<br>"]
         t = r["type"]
+        if t == "seepage" and r.get("three_d"):
+            t3 = r["three_d"]
+            h.append(f"<b>3D</b>: width {t3['width']:g} {u('length')}, {len(t3['z']) - 1} layers, {t3['n_nodes']} "
+                     f"nodes. Showing the section z = {r.get('slice_z', 0):g} (View > 3D Section).<br>")
+            for w in t3.get("wells", []):
+                h.append(f"Well {w['well']} (x {w['x']:g}, z {w['z']:g}): flow into the well "
+                         f"{w['flow']:.4e} {u('flux')}<br>")
+        if t == "seepage" and r.get("axisymmetric"):
+            h.append("<b>Axisymmetric</b>: flows are for the full circle.<br>")
         if t in ("seepage", "air"):
             h.append(f"Inflow: {r['inflow']:.4e} {u('flux')}<br>Outflow: {r['outflow']:.4e} {u('flux')}<br>")
             for name, q in (r.get("flux_sections") or {}).items():
@@ -1026,6 +1052,10 @@ class MainWindow(QMainWindow):
             h.append(f"Peak acceleration: {max(r['max_acceleration']):.3f} g<br>")
             if f1:
                 h.append(f"First natural frequency: {f1:.3f} Hz<br>")
+            if "ru" in r:
+                h.append(f"Largest excess pore pressure ratio ru = {r['max_ru']:.2f}<br>"
+                         f"Liquefied (ru >= 0.95): {sum(r['liquefied'])} elements, area {r['liquefied_area']:.1f} "
+                         f"{u('length')}²<br>")
         elif t == "thermal":
             h.append(f"Temperature range: {min(r['temperature']):.2f} to {max(r['temperature']):.2f} {u('temperature')}<br>")
             if "balance_error" in r:
@@ -1135,7 +1165,7 @@ class MainWindow(QMainWindow):
             d = BCDialog(bp["name"], bp["type"], bp["value"], parent=self, kinds=[group] if group else None,
                          value2=bp["value2"], fn=bp["fn"], analyses=bp["analyses"], project=self.project,
                          fn2=bp["fn2"], humidity=bp["humidity"], value3=bp.get("value3", 0.0),
-                         root_depth=bp.get("root_depth", 0.0))
+                         root_depth=bp.get("root_depth", 0.0), z1=bp.get("z1", 0.0), z2=bp.get("z2", 0.0))
             if not d.exec():
                 self.draw_actions["select"].setChecked(True)
                 mode = "select"
@@ -1773,9 +1803,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid input", f"{e}\n\nLine: {line}")
             return
         self.before_change()
+        old = {b.name: b for b in self.project.boundary_conditions}
         self.project.boundary_conditions = []
         for name, typ, val, pp, kw in bcs:
-            self.project.add_bc(name, typ, val, pp, **kw)
+            b = self.project.add_bc(name, typ, val, pp, **kw)
+            if name in old:          # keep the settings the text form does not show
+                for k in ("z1", "z2", "fn2", "humidity", "value3", "fn3", "root_depth"):
+                    setattr(b, k, getattr(old[name], k))
         self.after_change("Edit boundary conditions")
 
     def edit_reinforcement(self):
@@ -2414,6 +2448,14 @@ class MainWindow(QMainWindow):
         if run:
             d.exec()
         return d
+
+    def show_3d(self):
+        from .view3d import show_3d
+        return show_3d(self)
+
+    def choose_section(self, z=None):
+        from .view3d import choose_section
+        return choose_section(self, z)
 
     def tool3(self, name, run=True, tab=None):
         from . import tools, tools3

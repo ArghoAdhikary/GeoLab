@@ -243,10 +243,17 @@ MATERIAL_TABS = [
         ("hs_Eur", "Hardening Soil: Eur (unload-reload) at the reference pressure", "float", "modulus"),
         ("hs_m", "Hardening Soil: stress exponent m", "float"),
         ("hs_pref", "Hardening Soil: reference pressure", "float", "pressure"),
-        ("hs_Rf", "Hardening Soil: failure ratio Rf", "float")]),
+        ("hs_Rf", "Hardening Soil: failure ratio Rf", "float"),
+        ("iface_ks", "Interface: shear stiffness ks (pressure per length of slip)", "float"),
+        ("iface_kn", "Interface: normal stiffness kn (pressure per length)", "float"),
+        ("iface_c", "Interface: adhesion", "float", "pressure"),
+        ("iface_delta", "Interface: friction angle delta (deg)", "float")]),
     ("Dynamic", [
         ("damping", "Damping ratio (small strain)", "float"),
-        ("gamma_ref", "Reference shear strain (0 = linear)", "float"), ("damping_max", "Maximum damping ratio", "float")]),
+        ("gamma_ref", "Reference shear strain (0 = linear)", "float"), ("damping_max", "Maximum damping ratio", "float"),
+        ("liq_crr", "Pore pressure: cyclic resistance ratio CRR for 15 cycles (0 = none)", "float"),
+        ("liq_b", "Pore pressure: slope b of CRR vs cycles (CRR ~ N^-b)", "float"),
+        ("liq_alpha", "Pore pressure: ru curve shape alpha (0.7)", "float")]),
     ("Thermal", [
         ("th_k", "Unfrozen thermal conductivity", "float", "conductivity_th"),
         ("th_k_frozen", "Frozen thermal conductivity", "float", "conductivity_th"),
@@ -456,7 +463,15 @@ KIND_TABS = {
                              ("initial", "Initial conditions", "choice", INITIAL),
                              ("initial_value", "Initial total head", "float", "length"),
                              ("max_iter", "Max iterations per step", "int"), ("tolerance", "Head tolerance", "float")]),
-                ("Time", TIME)],
+                ("Time", TIME),
+                ("3D / Axisymmetric", [
+                    ("three_d", "3D: extrude the section over a width (wedge elements)", "bool"),
+                    ("width3d", "3D: width of the model in z", "float", "length"),
+                    ("n_layers3d", "3D: element layers across the width", "int"),
+                    ("slice_z", "3D: section shown in the results, z (negative = middle)", "float", "length"),
+                    ("wells", "3D wells", "table6",
+                     ["x", "z", "top y", "bottom y", "type (0 = fixed head, 1 = pumping rate)", "head or rate"]),
+                    ("axisymmetric", "Axisymmetric: x is the radius, the section turns about x = 0", "bool")])],
     "stress": [("Stress", [("insitu_method", "Method", "choice", INSITU_METHODS),
                            ("pwp", "Final PWP conditions from", "choice", STRESS_PWP),
                            ("mesh_size", "Mesh element size", "float", "length"),
@@ -466,6 +481,8 @@ KIND_TABS = {
                ("Time", TIME)],
     "dynamic": [("Dynamic", [("mesh_size", "Mesh element size", "float", "length"), ("dt", "Time step (s)", "float"),
                              ("n_eq_iter", "Equivalent linear iterations", "int"),
+                             ("pwp_generation", "Generate excess pore pressure and check liquefaction "
+                              "(materials with a CRR)", "bool"),
                              ("motion", "Input acceleration", "table2", ["time (s)", "acceleration (g)"])])],
     "thermal": [("Thermal", [("mesh_size", "Mesh element size", "float", "length"),
                              ("initial", "Initial conditions", "choice", {k: v for k, v in INITIAL.items() if k != "water_table"}),
@@ -483,7 +500,17 @@ KIND_TABS = {
 
 SLOPE_EXTRA = [("Rapid Drawdown", [
     ("rapid_drawdown", "Rapid drawdown: three-stage method (Duncan, Wright and Wong)", "bool"),
-    ("drawdown_level", "Reservoir level after drawdown (elevation)", "float", "length")])]
+    ("drawdown_level", "Reservoir level after drawdown (elevation)", "float", "length"),
+    ("post_earthquake", "After an earthquake: add the excess pore pressure of the parent dynamic analysis",
+     "bool")]),
+    ("3D", [
+        ("three_d", "3D: ellipsoidal slip surfaces on the section extruded over a width (3D Bishop)", "bool"),
+        ("width3d", "Width of the model in z", "float", "length"),
+        ("slide_lengths", "Trial slide lengths (empty = 1/4, 1/2, 3/4, 1 and 1.5 x the width)", "table1",
+         ["length"]),
+        ("slide_center_z", "Slide centre z (negative = middle of the load or of the width)", "float", "length"),
+        ("load_z1", "Surcharges and point loads from z", "float", "length"),
+        ("load_z2", "to z (both 0 = over the whole width)", "float", "length")])]
 SLOPE_OPTIMIZATION = [("optimize", "Optimize the critical slip surface (non-circular)", "bool"),
                       ("opt_iterations", "Optimization trials", "int")]
 SLOPE_CONVERGENCE = [("n_slices", "Number of slices", "int")]
@@ -1250,7 +1277,7 @@ BC_HELP = {
 
 class BCDialog(QDialog):
     def __init__(self, name="BC", type_="head", value=0.0, parent=None, kinds=None, value2=0.0, fn=None,
-                 analyses=None, project=None, fn2=None, humidity=0.5, value3=0.0, root_depth=0.0):
+                 analyses=None, project=None, fn2=None, humidity=0.5, value3=0.0, root_depth=0.0, z1=0.0, z2=0.0):
         super().__init__(parent)
         self.setWindowTitle("Boundary Condition")
         f = QFormLayout(self)
@@ -1288,6 +1315,13 @@ class BCDialog(QDialog):
         f.addRow("Plant transpiration (climate)", self.value3)
         f.addRow("Root depth (climate, 0 = no plants)", self.root_depth)
         f.addRow("Applies to", self.only)
+        self.z1 = dspin(z1, -1e9, 1e9, 3)
+        self.z2 = dspin(z2, -1e9, 1e9, 3)
+        self.z1.setToolTip("3D analyses only: the boundary acts from z1 to z2 across the width. "
+                           "Leave both 0 for the whole width.")
+        self.z2.setToolTip(self.z1.toolTip())
+        f.addRow("3D: from z", self.z1)
+        f.addRow("3D: to z (both 0 = whole width)", self.z2)
         self.help = QLabel()
         self.help.setWordWrap(True)
         self.help.setStyleSheet("color:#555")
@@ -1316,7 +1350,8 @@ class BCDialog(QDialog):
         return dict(name=self.name.text().strip() or "BC", type=self.type.currentData(), value=self.value.value(),
                     value2=self.value2.value(), fn=getattr(self, "fn_rows", []), analyses=[only] if only else [],
                     fn2=getattr(self, "fn2_rows", []), humidity=self.humidity.value(),
-                    value3=self.value3.value(), root_depth=self.root_depth.value())
+                    value3=self.value3.value(), root_depth=self.root_depth.value(),
+                    z1=self.z1.value(), z2=self.z2.value())
 
 
 class ReinforcementDialog(QDialog):

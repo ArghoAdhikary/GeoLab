@@ -1065,7 +1065,18 @@ def stress_interpolator(stress_results):
     return f
 
 
-def run_slope(project, analysis, seep_results=None, progress=None, cancel=None, stress_results=None) -> dict:
+def excess_pwp_fn(dyn_results):
+    """Excess pore pressure (x, y) after an earthquake from a dynamic analysis with pore pressure
+    generation (element values at the element centres)."""
+    from .fe import interpolator
+    nodes = np.asarray(dyn_results["nodes"])
+    tris = np.asarray(dyn_results["tris"])[:, :3]
+    cen = nodes[tris].mean(axis=1)
+    return interpolator(cen, dyn_results["excess_pwp"])
+
+
+def run_slope(project, analysis, seep_results=None, progress=None, cancel=None, stress_results=None,
+              excess_fn=None) -> dict:
     """Run the search and post-processing for a slope analysis. Returns a results dict."""
     from .geometry import validate_geometry
     problems = validate_geometry(project)
@@ -1082,6 +1093,16 @@ def run_slope(project, analysis, seep_results=None, progress=None, cancel=None, 
                          "(set it as this analysis's stress parent).")
     gp = GroundProfile(project.regions)
     pwp_fn = make_pwp_fn(project, analysis, seep_results)
+    if excess_fn is not None:            # after an earthquake: static + excess pore pressure
+        import copy as _copy
+        base, gw = pwp_fn, project.gamma_w
+
+        def pwp_fn(x, y, base=base):
+            b = base(x, y) if base is not None else np.zeros(np.broadcast(np.asarray(x), np.asarray(y)).shape)
+            return np.asarray(b, float) + np.asarray(excess_fn(x, y), float) / gw
+        if analysis.pwp not in ("piezometric", "seepage"):
+            analysis = _copy.copy(analysis)
+            analysis.pwp = "piezometric"
     surfaces = candidate_surfaces(project, analysis, gp)
     if not surfaces:
         raise ValueError("The slip surface search produced no trial surfaces. Check the search settings.")

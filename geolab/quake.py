@@ -7,6 +7,16 @@ damping set per element from its damping ratio at the first natural frequency of
 model and five times that frequency. With equivalent linear analysis the shear modulus
 and damping of each element follow hyperbolic modulus-reduction and damping curves of
 the effective shear strain (0.65 x maximum), iterated until they agree.
+
+Pore pressure generation (optional, for materials with a cyclic resistance ratio): every half
+cycle of horizontal shear stress in an element adds damage 0.5 / N_L, where N_L is the number of
+uniform cycles that liquefies the soil at that stress ratio, from CRR(N) = CRR15 (N / 15)^-b. The
+excess pore pressure ratio follows Seed, Martin and Lysmer (1976) / Booker et al. (1976):
+
+    ru = (2 / pi) arcsin(D^(1 / (2 alpha)))
+
+reaching 1 (liquefaction) when the damage D = sum(0.5 / N_L) reaches 1. The shear modulus of
+the next iteration is reduced by sqrt(1 - ru), as the effective stress falls.
 """
 from __future__ import annotations
 
@@ -66,6 +76,63 @@ def newmark_block(times, acc_g, ky, g):
     return d, out
 
 
+def ru_from_damage(D, alpha=0.7):
+    """Excess pore pressure ratio from the cyclic damage D = N / N_L (Seed et al. 1976)."""
+    D = np.clip(np.asarray(D, float), 0.0, 1.0)
+    return (2.0 / math.pi) * np.arcsin(D ** (1.0 / (2.0 * alpha)))
+
+
+def cycles_to_liquefy(csr, crr15, b=0.34):
+    """Number of uniform cycles N_L at a cyclic stress ratio, from CRR(N) = CRR15 (N / 15)^-b."""
+    csr = np.maximum(np.asarray(csr, float), 1e-12)
+    return 15.0 * (csr / np.maximum(crr15, 1e-12)) ** (-1.0 / np.maximum(b, 1e-6))
+
+
+class _Damage:
+    """Half-cycle counting of the horizontal shear stress of each element."""
+
+    def __init__(self, sv_eff, crr, b, alpha):
+        self.sv, self.crr, self.b, self.alpha = sv_eff, crr, b, alpha
+        self.on = crr > 0
+        n = len(sv_eff)
+        self.D = np.zeros(n)
+        self.sign = np.zeros(n)
+        self.peak = np.zeros(n)
+        self.t_liq = np.full(n, np.nan)
+
+    def _close(self, mask):
+        if mask.any():
+            csr = self.peak[mask] / self.sv[mask]
+            self.D[mask] += 0.5 / cycles_to_liquefy(csr, self.crr[mask], self.b[mask])
+            self.peak[mask] = 0.0
+
+    def step(self, tau, t):
+        sg = np.sign(tau)
+        flip = self.on & (sg != 0) & (self.sign != 0) & (sg != self.sign)
+        self._close(flip)
+        self.sign = np.where(sg != 0, sg, self.sign)
+        self.peak = np.maximum(self.peak, np.abs(tau))
+        new = self.on & np.isnan(self.t_liq) & (self.D >= 1.0)
+        self.t_liq[new] = t
+
+    def finish(self):
+        self._close(self.on & (self.peak > 0))
+        return np.where(self.on, ru_from_damage(self.D, self.alpha), 0.0)
+
+
+def _initial_effective(project, mesh):
+    """Vertical effective stress before the earthquake at each element (overburden minus the
+    hydrostatic pore pressure below the piezometric line)."""
+    from .geometry import polyline_y
+    from .sigma import overburden
+    x, y = mesh.gx.mean(axis=1), mesh.gy.mean(axis=1)
+    sv = overburden(project, x, y)
+    u = np.zeros_like(sv)
+    if len(project.piezometric_line) >= 2:
+        u = project.gamma_w * np.clip(np.asarray(polyline_y(project.piezometric_line, x), float) - y, 0.0, None)
+    return np.maximum(sv - u, 1e-3 * max(float(np.max(sv)), 1.0)), x, y
+
+
 def run_dynamic(project, analysis, progress=None, cancel=None, parent=None) -> dict:
     problems = validate_geometry(project)
     if problems:
@@ -107,6 +174,17 @@ def run_dynamic(project, analysis, progress=None, cancel=None, parent=None) -> d
     xi = xi0.copy()
     eq_hist = []
     n_iter = max(1, analysis.n_eq_iter) if analysis.equivalent_linear and np.any(gref > 0) else 1
+    crr = np.array([m.liq_crr for m in ml], float)
+    pwp_on = bool(getattr(analysis, "pwp_generation", False)) and bool(np.any(crr > 0))
+    if getattr(analysis, "pwp_generation", False) and not pwp_on:
+        raise ValueError("Pore pressure generation needs a cyclic resistance ratio (CRR) for at least one "
+                         "material (Materials > Dynamic).")
+    if pwp_on:
+        sv_eff0, _, _ = _initial_effective(project, mesh)
+        liq_b = np.array([m.liq_b for m in ml], float)
+        liq_a = np.array([m.liq_alpha for m in ml], float)
+        n_iter = max(n_iter, 3)
+    ru = np.zeros(mesh.ne)
     keep = max(1, len(t) // 400)
     for itn in range(n_iter):
         if cancel and cancel():
@@ -130,6 +208,7 @@ def run_dynamic(project, analysis, progress=None, cancel=None, parent=None) -> d
         gmax = np.zeros(mesh.ne)
         hist_t, hist_ax = [], []
         full = np.zeros(2 * mesh.nn)
+        dmg = _Damage(sv_eff0, crr, liq_b, liq_a) if pwp_on else None
         for k in range(1, len(t)):
             p = -Mr * ag[k]
             rhs = p + Mf @ ((4 / dt ** 2) * u + (4 / dt) * v + a) + Cf @ ((2 / dt) * u + v)
@@ -145,16 +224,21 @@ def run_dynamic(project, analysis, progress=None, cancel=None, parent=None) -> d
             eps = np.einsum("egij,ej->egi", mesh.B, full[mesh.dof])
             gam = np.sqrt((eps[..., 0] - eps[..., 1]) ** 2 + eps[..., 2] ** 2).max(axis=1)
             gmax = np.maximum(gmax, gam)
+            if dmg is not None:
+                dmg.step(G * eps[..., 2].mean(axis=1), t[k])
             if k % keep == 0:
                 hist_t.append(float(t[k]))
                 hist_ax.append((ax_tot / g).tolist())
             if progress and k % 50 == 0:
                 progress(int(100 * (itn + k / len(t)) / n_iter))
+        if dmg is not None:
+            ru = dmg.finish()
+            t_liq = dmg.t_liq
         if n_iter == 1:
             break
         geff = 0.65 * gmax
         ratio = np.where(gref > 0, 1 / (1 + geff / np.where(gref > 0, gref, 1)), 1.0)
-        Gn = G0 * ratio
+        Gn = G0 * ratio * np.maximum(np.sqrt(np.clip(1.0 - ru, 0.0, 1.0)), 0.05)
         xin = np.where(gref > 0, xi0 + (xi_max - xi0) * (1 - ratio), xi0)
         change = float(np.max(np.abs(Gn - G) / G0))
         eq_hist.append(change)
@@ -167,7 +251,15 @@ def run_dynamic(project, analysis, progress=None, cancel=None, parent=None) -> d
         f1 = float(math.sqrt(max(w2min[0], 0)) / (2 * math.pi))
     except Exception:
         f1 = None
-    return {"type": "dynamic", "converged": True, "nodes": nodes3.tolist(), "tris": tris3.tolist(),
+    extra = {}
+    if pwp_on:
+        A = mesh.dV.sum(axis=1)
+        liq = ru >= 0.95
+        extra = {"ru": ru.tolist(), "excess_pwp": (ru * sv_eff0).tolist(), "sv_eff0": sv_eff0.tolist(),
+                 "liquefied": liq.astype(int).tolist(), "liquefied_area": float(A[liq].sum()),
+                 "time_liquefied": [None if not np.isfinite(v) else float(v) for v in t_liq],
+                 "max_ru": float(ru.max()) if len(ru) else 0.0}
+    return {**extra, "type": "dynamic", "converged": True, "nodes": nodes3.tolist(), "tris": tris3.tolist(),
             "tri_material": mats.tolist(), "max_acceleration": (max_acc / g).tolist(),
             "max_displacement": max_disp.tolist(), "G_ratio": (G / G0).tolist(), "damping": xi.tolist(),
             "max_shear_strain": gmax.tolist(), "history_times": hist_t, "history_ax": hist_ax,

@@ -26,7 +26,7 @@ from .linsolve import factorize as splu
 
 from .sigma import M_VEC, mc_function, mc_gradient
 
-LINEAR, MOHR, CAMCLAY, HYPERBOLIC, VOID, HARDENING = 0, 1, 2, 3, 4, 5
+LINEAR, MOHR, CAMCLAY, HYPERBOLIC, VOID, HARDENING, IFACE = 0, 1, 2, 3, 4, 5, 6
 NONLINEAR_MODELS = ("cam_clay", "hyperbolic", "hardening_soil")
 P_MIN = 1.0               # smallest mean effective stress used for stiffness (pressure units)
 
@@ -245,7 +245,8 @@ class Constitutive:
         kind = np.array([VOID if m.stress_model == "none" else CAMCLAY if m.stress_model == "cam_clay" else
                          HYPERBOLIC if m.stress_model == "hyperbolic" else
                          HARDENING if m.stress_model == "hardening_soil" else
-                         MOHR if m.stress_model == "elastic_plastic" else LINEAR for m in ml])
+                         MOHR if m.stress_model == "elastic_plastic" else
+                         IFACE if m.stress_model == "interface" else LINEAR for m in ml])
         inactive = getattr(model, "inactive", None)
         if inactive is not None:
             kind = np.where(inactive, VOID, kind)
@@ -262,6 +263,10 @@ class Constitutive:
                       "Rf": rep([m.hs_Rf for m in ml]), "c": rep([m.cohesion for m in ml]),
                       "phi": rep([m.phi for m in ml]), "psi": rep([min(m.psi, m.phi) for m in ml]), "nu": self.nu}
         self.D_el = np.repeat(model.D, ngp, axis=0)
+        mi = getattr(model, "ifc", None)
+        self.ifc = None
+        if mi is not None and mi.mask.any():
+            self.ifc = {k: np.repeat(getattr(mi, k), ngp) for k in ("cs", "sn", "c", "tand")}
         self.c = model.c_gp.ravel()
         self.sphi, self.cphi = np.repeat(model.sphi, ngp), np.repeat(model.cphi, ngp)
         self.spsi, self.cpsi = np.repeat(model.spsi, ngp), np.repeat(model.cpsi, ngp)
@@ -285,6 +290,12 @@ class Constitutive:
             m = k == code
             if m.any():
                 s[m] = self.s[m] + np.einsum("nij,nj->ni", self.D_el[m], deps[m])
+        m = k == IFACE
+        if m.any():
+            from .interface import return_map
+            fc = self.ifc
+            s[m] = return_map(self.s[m] + np.einsum("nij,nj->ni", self.D_el[m], deps[m]), fc["cs"][m],
+                              fc["sn"][m], fc["c"][m], fc["tand"][m])
         m = k == MOHR
         if m.any():
             s[m] = mc_integrate(self.s[m], deps[m], self.D_el[m], self.c[m], self.sphi[m], self.cphi[m],
